@@ -4,6 +4,7 @@ struct PrinterControlView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showStatusPanel = true
     @State private var showMaterialsPanel = true
+    @State private var workspaceCamera = WorkspaceCamera()
 
     var body: some View {
         GeometryReader { _ in
@@ -113,21 +114,20 @@ struct PrinterControlView: View {
 
     private var bottomChrome: some View {
         HStack {
-            xyzDiagram
-            Spacer()
             floatingInfoCard(title: "Printer") {
                 deviceRow("Selected", store.selectedPrinter.displayName)
                 deviceRow("Mode", "3D device workspace")
             }
             .frame(width: 240, alignment: .leading)
+            Spacer()
         }
     }
 
     private var deviceWorkspace: some View {
-        ZStack {
+        WorkspaceViewport(camera: $workspaceCamera) {
             DeviceWorkspaceGrid()
                 .clipShape(RoundedRectangle(cornerRadius: 28))
-
+        } content: {
             HStack(spacing: 28) {
                 deviceCard(title: "Camera") {
                     RoundedRectangle(cornerRadius: 18)
@@ -175,55 +175,7 @@ struct PrinterControlView: View {
     }
 
     private var orientationCluster: some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 58, height: 58)
-                .overlay(
-                    VStack(spacing: 2) {
-                        Text("Top")
-                            .font(.caption2.weight(.bold))
-                        Text("Right")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.white.opacity(0.8))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-
-            xyzDiagram
-        }
-    }
-
-    private var xyzDiagram: some View {
-        ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.black.opacity(0.32))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 1))
-
-            Canvas { context, size in
-                let origin = CGPoint(x: 20, y: size.height - 20)
-                var zAxis = Path()
-                zAxis.move(to: origin)
-                zAxis.addLine(to: CGPoint(x: origin.x, y: origin.y - 30))
-                context.stroke(zAxis, with: .color(.blue.opacity(0.9)), lineWidth: 2)
-
-                var xAxis = Path()
-                xAxis.move(to: origin)
-                xAxis.addLine(to: CGPoint(x: origin.x + 30, y: origin.y))
-                context.stroke(xAxis, with: .color(.red.opacity(0.9)), lineWidth: 2)
-
-                var yAxis = Path()
-                yAxis.move(to: origin)
-                yAxis.addLine(to: CGPoint(x: origin.x + 22, y: origin.y - 22))
-                context.stroke(yAxis, with: .color(.green.opacity(0.9)), lineWidth: 2)
-            }
-            .padding(6)
-        }
-        .frame(width: 88, height: 88)
+        WorkspaceNavigationCluster(camera: $workspaceCamera)
     }
 
     private func chromeLabel(_ title: String, _ systemName: String, action: @escaping () -> Void) -> some View {

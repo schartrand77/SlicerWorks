@@ -5,6 +5,7 @@ struct ModelPaintingView: View {
     @State private var showToolsPanel = true
     @State private var showColorPanel = true
     @State private var showPencilPanel = true
+    @State private var workspaceCamera = WorkspaceCamera()
 
     var body: some View {
         GeometryReader { _ in
@@ -106,6 +107,8 @@ struct ModelPaintingView: View {
 
     private var rightChrome: some View {
         VStack(alignment: .trailing, spacing: 12) {
+            WorkspaceNavigationCluster(camera: $workspaceCamera)
+
             VStack(alignment: .trailing, spacing: 10) {
                 chromeLabel(title: "Pencil", systemName: "applepencil") {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -130,11 +133,8 @@ struct ModelPaintingView: View {
 
     private var bottomChrome: some View {
         HStack {
-            xyzDiagram
-
-            Spacer()
-
             floatingStatus
+            Spacer()
         }
     }
 
@@ -199,65 +199,76 @@ struct ModelPaintingView: View {
     }
 
     private var paintingWorkspace: some View {
-        GeometryReader { geometry in
-            ZStack {
-                PaintingGrid()
-                    .clipShape(RoundedRectangle(cornerRadius: 28))
+        WorkspaceViewport(camera: $workspaceCamera) {
+            PaintingGrid()
+                .clipShape(RoundedRectangle(cornerRadius: 28))
+        } content: {
+            GeometryReader { geometry in
+                ZStack {
+                    mockModelStage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                mockModelStage
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    paintSurfaceOverlay
 
-                paintSurfaceOverlay
+                    if store.selectedModel != nil {
+                        ApplePencilCanvasView(
+                            onHoverChanged: { location, azimuth, altitude, zOffset, roll in
+                                store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                            },
+                            onStrokeBegan: { location, force, azimuth, roll in
+                                store.beginPaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
+                            },
+                            onStrokeMoved: { location, force, azimuth, roll in
+                                store.continuePaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
+                            },
+                            onStrokeEnded: {
+                                store.endPaintingStroke()
+                            },
+                            onTap: { location, azimuth, altitude, zOffset, roll in
+                                store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                                store.handlePencilDoubleTap()
+                            },
+                            onSqueeze: { location, azimuth, altitude, zOffset, roll in
+                                store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                                store.handlePencilSqueeze()
+                            }
+                        )
+                    }
 
-                if store.selectedModel != nil {
-                    ApplePencilCanvasView(
-                        onHoverChanged: { location, azimuth, altitude, zOffset, roll in
-                            store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
-                        },
-                        onStrokeBegan: { location, force, azimuth, roll in
-                            store.beginPaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
-                        },
-                        onStrokeMoved: { location, force, azimuth, roll in
-                            store.continuePaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
-                        },
-                        onStrokeEnded: {
-                            store.endPaintingStroke()
-                        },
-                        onTap: { location, azimuth, altitude, zOffset, roll in
-                            store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
-                            store.handlePencilDoubleTap()
-                        },
-                        onSqueeze: { location, azimuth, altitude, zOffset, roll in
-                            store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
-                            store.handlePencilSqueeze()
-                        }
-                    )
-                }
+                    if let selectedModel = store.selectedModel {
+                        Text(selectedModel.name)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.22), in: Capsule())
+                            .padding(.top, 72)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
 
-                if let selectedModel = store.selectedModel {
-                    Text(selectedModel.name)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.22), in: Capsule())
-                        .padding(.top, 72)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
+                    if store.selectedModel == nil {
+                        centerHint(
+                            icon: "cube.transparent",
+                            title: "Select a model in Slice first",
+                            subtitle: "Every loaded model stays in a 3D workspace, including Paint."
+                        )
+                    }
 
-                if store.selectedModel == nil {
-                    centerHint(
-                        icon: "cube.transparent",
-                        title: "Select a model in Slice first",
-                        subtitle: "Every loaded model stays in a 3D workspace, including Paint."
-                    )
+                    if store.selectedModel != nil && store.selectedModelPaintingStrokes.isEmpty && store.activePaintingStroke == nil {
+                        centerHint(
+                            icon: "applepencil.tip",
+                            title: "Hover, squeeze, and paint in 3D",
+                            subtitle: "Touch stays for navigation. Apple Pencil edits the selected model surface."
+                        )
+                        .frame(maxWidth: geometry.size.width * 0.5)
+                    }
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if store.selectedModel == nil {
-                    store.selectModel(store.selectedPlate?.models.first?.id)
-                }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if store.selectedModel == nil {
+                store.selectModel(store.selectedPlate?.models.first?.id)
             }
         }
     }
@@ -325,15 +336,6 @@ struct ModelPaintingView: View {
                         isActive: store.pencilState.isHovering
                     )
                 }
-
-                if store.selectedModel != nil && store.selectedModelPaintingStrokes.isEmpty && store.activePaintingStroke == nil {
-                    centerHint(
-                        icon: "applepencil.tip",
-                        title: "Hover, squeeze, and paint in 3D",
-                        subtitle: "Touch stays for navigation. Apple Pencil edits the selected model surface."
-                    )
-                    .frame(maxWidth: geometry.size.width * 0.5)
-                }
             }
         }
     }
@@ -352,40 +354,6 @@ struct ModelPaintingView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
         .frame(width: 260, alignment: .leading)
-    }
-
-    private var xyzDiagram: some View {
-        ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.black.opacity(0.32))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 1))
-
-            Canvas { context, size in
-                let origin = CGPoint(x: 20, y: size.height - 20)
-
-                var zAxis = Path()
-                zAxis.move(to: origin)
-                zAxis.addLine(to: CGPoint(x: origin.x, y: origin.y - 30))
-                context.stroke(zAxis, with: .color(.blue.opacity(0.9)), lineWidth: 2)
-
-                var xAxis = Path()
-                xAxis.move(to: origin)
-                xAxis.addLine(to: CGPoint(x: origin.x + 30, y: origin.y))
-                context.stroke(xAxis, with: .color(.red.opacity(0.9)), lineWidth: 2)
-
-                var yAxis = Path()
-                yAxis.move(to: origin)
-                yAxis.addLine(to: CGPoint(x: origin.x + 22, y: origin.y - 22))
-                context.stroke(yAxis, with: .color(.green.opacity(0.9)), lineWidth: 2)
-
-                context.draw(Text("Z").font(.caption.bold()).foregroundColor(.blue.opacity(0.95)), at: CGPoint(x: origin.x, y: origin.y - 40))
-                context.draw(Text("X").font(.caption.bold()).foregroundColor(.red.opacity(0.95)), at: CGPoint(x: origin.x + 40, y: origin.y))
-                context.draw(Text("Y").font(.caption.bold()).foregroundColor(.green.opacity(0.95)), at: CGPoint(x: origin.x + 30, y: origin.y - 28))
-            }
-            .padding(6)
-        }
-        .frame(width: 88, height: 88)
     }
 
     private func draw(stroke: PaintingStroke, in context: inout GraphicsContext) {
