@@ -155,7 +155,7 @@ struct SlicerDashboardView: View {
 
     private var rightSideChrome: some View {
         VStack(alignment: .trailing, spacing: 12) {
-            orientationCube
+            orientationCluster
 
             VStack(alignment: .trailing, spacing: 8) {
                 sideTagButton(title: "Display", systemName: "circle.lefthalf.filled", alignedTrailing: true)
@@ -197,10 +197,7 @@ struct SlicerDashboardView: View {
 
     private var bottomChrome: some View {
         HStack {
-            axisTile
-
             Spacer()
-
             floatingStatusCard
         }
     }
@@ -380,11 +377,11 @@ struct SlicerDashboardView: View {
         }
     }
 
-    private var orientationCube: some View {
-        VStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 12)
+    private var orientationCluster: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            RoundedRectangle(cornerRadius: 14)
                 .fill(Color.white.opacity(0.08))
-                .frame(width: 56, height: 56)
+                .frame(width: 58, height: 58)
                 .overlay(
                     VStack(spacing: 2) {
                         Text("Top")
@@ -394,22 +391,47 @@ struct SlicerDashboardView: View {
                     }
                     .foregroundStyle(.white.opacity(0.8))
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
 
-            roundIconBadge("cube.transparent")
+            xyzDiagram
         }
     }
 
-    private var axisTile: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Top")
-                .font(.caption2.weight(.bold))
-            Text("Front")
-                .font(.caption2)
+    private var xyzDiagram: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.black.opacity(0.32))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 1))
+
+            Canvas { context, size in
+                let origin = CGPoint(x: 20, y: size.height - 20)
+
+                var zAxis = Path()
+                zAxis.move(to: origin)
+                zAxis.addLine(to: CGPoint(x: origin.x, y: origin.y - 30))
+                context.stroke(zAxis, with: .color(.blue.opacity(0.9)), lineWidth: 2)
+
+                var xAxis = Path()
+                xAxis.move(to: origin)
+                xAxis.addLine(to: CGPoint(x: origin.x + 30, y: origin.y))
+                context.stroke(xAxis, with: .color(.red.opacity(0.9)), lineWidth: 2)
+
+                var yAxis = Path()
+                yAxis.move(to: origin)
+                yAxis.addLine(to: CGPoint(x: origin.x + 22, y: origin.y - 22))
+                context.stroke(yAxis, with: .color(.green.opacity(0.9)), lineWidth: 2)
+
+                context.draw(Text("Z").font(.caption.bold()).foregroundColor(.blue.opacity(0.95)), at: CGPoint(x: origin.x, y: origin.y - 40))
+                context.draw(Text("X").font(.caption.bold()).foregroundColor(.red.opacity(0.95)), at: CGPoint(x: origin.x + 40, y: origin.y))
+                context.draw(Text("Y").font(.caption.bold()).foregroundColor(.green.opacity(0.95)), at: CGPoint(x: origin.x + 30, y: origin.y - 28))
+            }
+            .padding(6)
         }
-        .foregroundStyle(.white.opacity(0.76))
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.06), lineWidth: 1))
+        .frame(width: 88, height: 88)
     }
 
     private var floatingStatusCard: some View {
@@ -581,21 +603,6 @@ private struct WorkspaceGrid: View {
                     context.stroke(path, with: .color(major), lineWidth: 1)
                 }
 
-                var verticalAxis = Path()
-                verticalAxis.move(to: CGPoint(x: size.width * 0.34, y: 0))
-                verticalAxis.addLine(to: CGPoint(x: size.width * 0.34, y: size.height))
-                context.stroke(verticalAxis, with: .color(.blue.opacity(0.45)), lineWidth: 1.2)
-
-                var diagonalAxis = Path()
-                diagonalAxis.move(to: CGPoint(x: size.width * 0.62, y: size.height))
-                diagonalAxis.addLine(to: CGPoint(x: size.width, y: size.height * 0.34))
-                context.stroke(diagonalAxis, with: .color(.green.opacity(0.45)), lineWidth: 1.2)
-
-                var horizontalAxis = Path()
-                horizontalAxis.move(to: CGPoint(x: size.width * 0.44, y: size.height * 0.78))
-                diagonalAxis = horizontalAxis
-                horizontalAxis.addLine(to: CGPoint(x: size.width * 0.72, y: size.height))
-                context.stroke(horizontalAxis, with: .color(.red.opacity(0.45)), lineWidth: 1.2)
             }
         }
     }
