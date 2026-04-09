@@ -1,5 +1,5 @@
 import XCTest
-@testable import SlicerWorksApp
+@testable import SlicerWorks
 
 final class AppStatusTests: XCTestCase {
     func testIdleMessageIsExposed() {

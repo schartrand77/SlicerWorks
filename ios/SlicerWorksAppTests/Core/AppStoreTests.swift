@@ -1,5 +1,5 @@
 import XCTest
-@testable import SlicerWorksApp
+@testable import SlicerWorks
 
 @MainActor
 final class AppStoreTests: XCTestCase {
@@ -7,7 +7,10 @@ final class AppStoreTests: XCTestCase {
         let result = SliceResult(
             gcodeURL: URL(fileURLWithPath: "/tmp/test.gcode"),
             estimatedPrintTimeMinutes: 42,
-            estimatedFilamentGrams: 12.5
+            estimatedFilamentGrams: 12.5,
+            estimatedFilamentMeters: 4.11,
+            selectedQualityPreset: .balanced,
+            selectedMaterial: .pla
         )
         let store = AppStore(
             environment: AppEnvironment(
@@ -62,7 +65,10 @@ final class AppStoreTests: XCTestCase {
         let result = SliceResult(
             gcodeURL: URL(fileURLWithPath: "/tmp/queued.gcode"),
             estimatedPrintTimeMinutes: 60,
-            estimatedFilamentGrams: 20
+            estimatedFilamentGrams: 20,
+            estimatedFilamentMeters: 6.41,
+            selectedQualityPreset: .fine,
+            selectedMaterial: .petg
         )
         let deviceGateway = RecordingDeviceGateway()
         let store = AppStore(
@@ -83,13 +89,10 @@ final class AppStoreTests: XCTestCase {
     }
 
     func testLoadLastProjectRestoresProjectAndPrinter() {
-        let savedProject = SliceProject(
-            id: UUID(),
+        let savedProject = makeProject(
             name: "Saved Cube",
-            modelURL: URL(fileURLWithPath: "/tmp/saved.3mf"),
-            materialAssignments: [],
-            layerHeightMM: 0.12,
-            infillPercent: 25
+            modelURLs: [URL(fileURLWithPath: "/tmp/saved.3mf")],
+            settings: .recommended(for: .a1Mini, quality: .fine, material: .pla)
         )
         let repository = InMemoryProjectRepository(
             document: SliceProjectDocument(
@@ -124,13 +127,10 @@ final class AppStoreTests: XCTestCase {
                 projectValidator: DefaultProjectValidator()
             )
         )
-        let currentProject = SliceProject(
-            id: UUID(),
+        let currentProject = makeProject(
             name: "Bracket",
-            modelURL: URL(fileURLWithPath: "/tmp/bracket.stl"),
-            materialAssignments: [],
-            layerHeightMM: 0.16,
-            infillPercent: 30
+            modelURLs: [URL(fileURLWithPath: "/tmp/bracket.stl")],
+            settings: .recommended(for: .p1S, quality: .balanced, material: .petg)
         )
         store.activeProject = currentProject
         store.selectedPrinter = .p1S
@@ -155,13 +155,10 @@ final class AppStoreTests: XCTestCase {
         )
 
         store.loadLastProject()
-        store.activeProject = SliceProject(
-            id: UUID(),
+        store.activeProject = makeProject(
             name: "Auto Saved Part",
-            modelURL: URL(fileURLWithPath: "/tmp/part.stl"),
-            materialAssignments: [],
-            layerHeightMM: 0.2,
-            infillPercent: 10
+            modelURLs: [URL(fileURLWithPath: "/tmp/part.stl")],
+            settings: .recommended(for: .x1Carbon, quality: .draft, material: .pla)
         )
 
         let document = try XCTUnwrap(repository.loadLastProject())
@@ -178,20 +175,74 @@ final class AppStoreTests: XCTestCase {
                 projectValidator: DefaultProjectValidator()
             )
         )
+        var invalidSettings = SliceSettings.recommended(for: .x1Carbon, quality: .balanced, material: .pla)
+        invalidSettings.layerHeightMM = 0.5
+        invalidSettings.infillPercent = -1
+        invalidSettings.brimWidthMM = 5
+        invalidSettings.adhesionType = .none
 
-        store.activeProject = SliceProject(
-            id: UUID(),
+        store.activeProject = makeProject(
             name: "",
-            modelURL: URL(fileURLWithPath: "/tmp/part.unsupported"),
-            materialAssignments: [],
-            layerHeightMM: 0.5,
-            infillPercent: -1
+            modelURLs: [URL(fileURLWithPath: "/tmp/part.unsupported")],
+            settings: invalidSettings
         )
 
         XCTAssertEqual(
             Set(store.projectValidationIssues.map(\.id)),
-            Set(["project-name", "model-format", "layer-height", "infill"])
+            Set(["project-name", "model-format", "layer-height", "infill", "brim-width"])
         )
+    }
+
+    func testApplyRecommendedSettingsUsesCurrentPrinterQualityAndMaterial() {
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+        store.selectedPrinter = .a1Mini
+        store.activeProject.sliceSettings.qualityPreset = .fine
+        store.activeProject.sliceSettings.filamentMaterial = .petg
+
+        store.applyRecommendedSettings()
+
+        XCTAssertEqual(
+            store.activeProject.sliceSettings,
+            .recommended(for: .a1Mini, quality: .fine, material: .petg)
+        )
+    }
+
+    func testPaintingCommitsSurfaceRegionToSelectedModelAndPersists() throws {
+        let repository = InMemoryProjectRepository()
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                projectRepository: repository,
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+
+        let start = CGPoint(x: 24, y: 36)
+        let end = CGPoint(x: 40, y: 52)
+
+        store.beginPaintingStroke(at: start, force: 0.8, azimuth: 0.4, roll: 0.2)
+        store.continuePaintingStroke(at: end, force: 0.9, azimuth: 0.5, roll: 0.3)
+        store.endPaintingStroke()
+        store.saveActiveProject()
+
+        XCTAssertEqual(store.selectedModelPaintingStrokes.count, 1)
+        XCTAssertEqual(store.paintingStrokeCount(for: try XCTUnwrap(store.selectedModelID)), 1)
+        XCTAssertEqual(store.selectedModel?.surfacePaintRegions.count, 1)
+        XCTAssertEqual(store.selectedModel?.surfacePaintRegions.first?.color, store.activeProject.sliceSettings.surfaceColor)
+
+        let document = try XCTUnwrap(repository.loadLastProject())
+        let savedModel = try XCTUnwrap(document.project.plates.first?.models.first)
+
+        XCTAssertEqual(savedModel.surfacePaintRegions.count, 1)
+        XCTAssertEqual(savedModel.surfacePaintRegions.first?.points, [start, end])
     }
 }
 
@@ -223,10 +274,39 @@ private enum TestError: Error {
     case slice
 }
 
+private func makeProject(name: String, modelURLs: [URL], settings: SliceSettings) -> SliceProject {
+    SliceProject(
+        id: UUID(),
+        name: name,
+        plates: [
+            BuildPlate(
+                id: UUID(),
+                name: "Plate 1",
+                models: modelURLs.enumerated().map { index, url in
+                    PlacedModel(
+                        id: UUID(),
+                        name: "Model \(index + 1)",
+                        sourceURL: url,
+                        position: PlatePosition(x: Double(index * 24), y: Double(index * 18)),
+                        rotationDegrees: 0,
+                        scalePercent: 100,
+                        surfacePaintRegions: []
+                    )
+                }
+            )
+        ],
+        materialAssignments: [],
+        sliceSettings: settings
+    )
+}
+
 private extension SliceResult {
     static let example = SliceResult(
         gcodeURL: URL(fileURLWithPath: "/tmp/example.gcode"),
         estimatedPrintTimeMinutes: 100,
-        estimatedFilamentGrams: 18
+        estimatedFilamentGrams: 18,
+        estimatedFilamentMeters: 5.87,
+        selectedQualityPreset: .balanced,
+        selectedMaterial: .pla
     )
 }

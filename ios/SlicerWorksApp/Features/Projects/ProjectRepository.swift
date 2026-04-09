@@ -38,7 +38,7 @@ struct UserDefaultsProjectRepository: ProjectRepository {
 }
 
 struct InMemoryProjectRepository: ProjectRepository {
-    private final class Storage {
+    final class Storage {
         var document: SliceProjectDocument?
     }
 

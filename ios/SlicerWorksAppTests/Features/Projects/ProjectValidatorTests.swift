@@ -1,15 +1,12 @@
 import XCTest
-@testable import SlicerWorksApp
+@testable import SlicerWorks
 
 final class ProjectValidatorTests: XCTestCase {
     func testValidatorAcceptsSupportedProject() {
-        let project = SliceProject(
-            id: UUID(),
+        let project = makeProject(
             name: "Benchy",
-            modelURL: URL(fileURLWithPath: "/tmp/benchy.3mf"),
-            materialAssignments: [],
-            layerHeightMM: 0.2,
-            infillPercent: 15
+            modelURLs: [URL(fileURLWithPath: "/tmp/benchy.3mf")],
+            settings: .recommended(for: .x1Carbon, quality: .balanced, material: .pla)
         )
 
         let issues = DefaultProjectValidator().validate(project: project, printer: .x1Carbon)
@@ -18,13 +15,14 @@ final class ProjectValidatorTests: XCTestCase {
     }
 
     func testValidatorRejectsBlankNameUnsupportedFormatAndOutOfRangeSettings() {
-        let project = SliceProject(
-            id: UUID(),
+        var settings = SliceSettings.recommended(for: .x1Carbon, quality: .balanced, material: .pla)
+        settings.layerHeightMM = 0.4
+        settings.infillPercent = 110
+
+        let project = makeProject(
             name: "   ",
-            modelURL: URL(fileURLWithPath: "/tmp/benchy.gltf"),
-            materialAssignments: [],
-            layerHeightMM: 0.4,
-            infillPercent: 110
+            modelURLs: [URL(fileURLWithPath: "/tmp/benchy.gltf")],
+            settings: settings
         )
 
         let issues = DefaultProjectValidator().validate(project: project, printer: .x1Carbon)
@@ -35,22 +33,47 @@ final class ProjectValidatorTests: XCTestCase {
         )
     }
 
-    func testValidatorRejectsDuplicateFaceAssignments() {
+    func testValidatorRejectsEmptyPlateAndDuplicateFaceAssignments() {
         let material = Filament(brand: "Bambu", material: "PLA", colorHex: "#FFFFFF")
         let project = SliceProject(
             id: UUID(),
             name: "Bracket",
-            modelURL: URL(fileURLWithPath: "/tmp/bracket.stl"),
+            plates: [BuildPlate(id: UUID(), name: "Plate 1", models: [])],
             materialAssignments: [
                 MaterialAssignment(faceIdentifier: "face-1", filament: material),
                 MaterialAssignment(faceIdentifier: "face-1", filament: material)
             ],
-            layerHeightMM: 0.16,
-            infillPercent: 20
+            sliceSettings: .recommended(for: .p1S, quality: .balanced, material: .pla)
         )
 
         let issues = DefaultProjectValidator().validate(project: project, printer: .p1S)
 
-        XCTAssertEqual(issues.map(\.id), ["material-assignments"])
+        XCTAssertEqual(Set(issues.map(\.id)), Set(["material-assignments", "model-format"]))
     }
+}
+
+private func makeProject(name: String, modelURLs: [URL], settings: SliceSettings) -> SliceProject {
+    SliceProject(
+        id: UUID(),
+        name: name,
+        plates: [
+            BuildPlate(
+                id: UUID(),
+                name: "Plate 1",
+                models: modelURLs.enumerated().map { index, url in
+                    PlacedModel(
+                        id: UUID(),
+                        name: "Model \(index + 1)",
+                        sourceURL: url,
+                        position: PlatePosition(x: Double(index * 30), y: Double(index * 20)),
+                        rotationDegrees: 0,
+                        scalePercent: 100,
+                        surfacePaintRegions: []
+                    )
+                }
+            )
+        ],
+        materialAssignments: [],
+        sliceSettings: settings
+    )
 }
