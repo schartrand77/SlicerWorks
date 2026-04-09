@@ -2,19 +2,341 @@ import SwiftUI
 
 struct PrinterControlView: View {
     @EnvironmentObject private var store: AppStore
+    @State private var showStatusPanel = true
+    @State private var showMaterialsPanel = true
 
     var body: some View {
-        List {
-            Section("Bambu Lab") {
-                Label("LAN discovery", systemImage: "dot.radiowaves.left.and.right")
-                Label("Cloud queue (future)", systemImage: "icloud")
-                Label("AMS filament sync", systemImage: "square.stack.3d.up")
-            }
+        GeometryReader { _ in
+            ZStack {
+                workspaceBackground
 
-            Section("Selected") {
-                Text(store.selectedPrinter.displayName)
+                deviceWorkspace
+                    .padding(12)
+
+                topBar
+                    .padding(.top, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                leftChrome
+                    .padding(.leading, 10)
+                    .padding(.top, 20)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+                rightChrome
+                    .padding(.trailing, 12)
+                    .padding(.top, 20)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+
+                bottomChrome
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
         }
-        .navigationTitle("Printers")
+        .navigationBarHidden(true)
+        .background(Color.black)
+    }
+
+    private var workspaceBackground: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.10, green: 0.10, blue: 0.11),
+                Color(red: 0.07, green: 0.07, blue: 0.08)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            miniTopIcon("printer.fill")
+            Text(store.selectedPrinter.displayName)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+            Button("Status") {}
+                .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
+            Button("Calibration") {}
+                .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
+            Button("Queue") {}
+                .buttonStyle(DeviceCapsuleStyle(fill: Color.blue.opacity(0.88)))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private var leftChrome: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            chromeLabel("Status", "wave.3.right") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showStatusPanel.toggle()
+                }
+            }
+            chromeLabel("Storage", "externaldrive") {}
+            chromeLabel("Materials", "square.stack.3d.up") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showMaterialsPanel.toggle()
+                }
+            }
+            chromeLabel("Assistant", "sparkles") {}
+
+            if showStatusPanel {
+                statusPanel
+            }
+
+            Spacer()
+        }
+    }
+
+    private var rightChrome: some View {
+        VStack(alignment: .trailing, spacing: 12) {
+            orientationCluster
+
+            if showMaterialsPanel {
+                materialsPanel
+            }
+
+            floatingInfoCard(title: "Controls") {
+                deviceRow("LAN discovery", "Active")
+                deviceRow("Cloud queue", "Future")
+                deviceRow("AMS sync", "Ready")
+            }
+
+            Spacer()
+        }
+    }
+
+    private var bottomChrome: some View {
+        HStack {
+            xyzDiagram
+            Spacer()
+            floatingInfoCard(title: "Printer") {
+                deviceRow("Selected", store.selectedPrinter.displayName)
+                deviceRow("Mode", "3D device workspace")
+            }
+            .frame(width: 240, alignment: .leading)
+        }
+    }
+
+    private var deviceWorkspace: some View {
+        ZStack {
+            DeviceWorkspaceGrid()
+                .clipShape(RoundedRectangle(cornerRadius: 28))
+
+            HStack(spacing: 28) {
+                deviceCard(title: "Camera") {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(Color.black)
+                        .overlay(Text("Live camera").foregroundStyle(.white.opacity(0.5)))
+                }
+
+                deviceCard(title: "Printer Stage") {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(Color.white.opacity(0.04))
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.88), Color.green.opacity(0.72)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(width: 90, height: 150)
+                            .rotation3DEffect(.degrees(18), axis: (x: 0, y: 1, z: 0))
+                    }
+                }
+            }
+            .padding(.horizontal, 120)
+        }
+    }
+
+    private var statusPanel: some View {
+        floatingInfoCard(title: "Bambu Lab") {
+            deviceRow("LAN discovery", "Enabled")
+            deviceRow("Cloud queue", "Future")
+            deviceRow("AMS filament sync", "Available")
+        }
+        .frame(width: 220, alignment: .leading)
+    }
+
+    private var materialsPanel: some View {
+        floatingInfoCard(title: "Materials") {
+            deviceRow("PLA", "Loaded")
+            deviceRow("PETG", "Idle")
+            deviceRow("ABS", "Empty")
+        }
+        .frame(width: 220, alignment: .leading)
+    }
+
+    private var orientationCluster: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 58, height: 58)
+                .overlay(
+                    VStack(spacing: 2) {
+                        Text("Top")
+                            .font(.caption2.weight(.bold))
+                        Text("Right")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.white.opacity(0.8))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+
+            xyzDiagram
+        }
+    }
+
+    private var xyzDiagram: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.black.opacity(0.32))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 1))
+
+            Canvas { context, size in
+                let origin = CGPoint(x: 20, y: size.height - 20)
+                var zAxis = Path()
+                zAxis.move(to: origin)
+                zAxis.addLine(to: CGPoint(x: origin.x, y: origin.y - 30))
+                context.stroke(zAxis, with: .color(.blue.opacity(0.9)), lineWidth: 2)
+
+                var xAxis = Path()
+                xAxis.move(to: origin)
+                xAxis.addLine(to: CGPoint(x: origin.x + 30, y: origin.y))
+                context.stroke(xAxis, with: .color(.red.opacity(0.9)), lineWidth: 2)
+
+                var yAxis = Path()
+                yAxis.move(to: origin)
+                yAxis.addLine(to: CGPoint(x: origin.x + 22, y: origin.y - 22))
+                context.stroke(yAxis, with: .color(.green.opacity(0.9)), lineWidth: 2)
+            }
+            .padding(6)
+        }
+        .frame(width: 88, height: 88)
+    }
+
+    private func chromeLabel(_ title: String, _ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                roundIconBadge(systemName)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func roundIconBadge(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.9))
+            .frame(width: 32, height: 32)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private func miniTopIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.88))
+            .frame(width: 28, height: 28)
+    }
+
+    private func floatingInfoCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white.opacity(0.76))
+            content()
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private func deviceRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.white.opacity(0.56))
+            Spacer()
+            Text(value)
+                .foregroundStyle(.white)
+        }
+        .font(.caption2)
+    }
+
+    private func deviceCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white.opacity(0.7))
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.06), lineWidth: 1))
+    }
+}
+
+private struct DeviceCapsuleStyle: ButtonStyle {
+    let fill: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.75 : 1))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(fill.opacity(configuration.isPressed ? 0.85 : 1), in: Capsule())
+    }
+}
+
+private struct DeviceWorkspaceGrid: View {
+    var body: some View {
+        Canvas { context, size in
+            let major = Color.white.opacity(0.07)
+            let minor = Color.white.opacity(0.028)
+
+            for x in stride(from: 0, through: size.width, by: 24) {
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(path, with: .color(minor), lineWidth: 1)
+            }
+
+            for y in stride(from: 0, through: size.height, by: 24) {
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(path, with: .color(minor), lineWidth: 1)
+            }
+
+            for x in stride(from: 0, through: size.width, by: 96) {
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(path, with: .color(major), lineWidth: 1.1)
+            }
+
+            for y in stride(from: 0, through: size.height, by: 96) {
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                context.stroke(path, with: .color(major), lineWidth: 1.1)
+            }
+        }
     }
 }

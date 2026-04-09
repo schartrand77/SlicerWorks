@@ -26,5 +26,8 @@ struct RootTabView: View {
                 Label("Devices", systemImage: "wifi")
             }
         }
+        .tint(.blue)
+        .toolbarBackground(Color.black.opacity(0.92), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
     }
 }

@@ -2,198 +2,306 @@ import SwiftUI
 
 struct ModelPaintingView: View {
     @EnvironmentObject private var store: AppStore
+    @State private var showToolsPanel = true
+    @State private var showColorPanel = true
+    @State private var showPencilPanel = true
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            wideLayout
-            compactLayout
-        }
-        .navigationTitle("Paint")
-        .navigationBarTitleDisplayMode(.inline)
-        .background(Color(red: 0.95, green: 0.95, blue: 0.93))
-    }
+        GeometryReader { _ in
+            ZStack {
+                workspaceBackground
 
-    private var wideLayout: some View {
-        HStack(spacing: 16) {
-            toolRail
-                .frame(width: 240)
-
-            paintingWorkspace
-
-            pencilInspector
-                .frame(width: 300)
-        }
-        .padding(16)
-    }
-
-    private var compactLayout: some View {
-        ScrollView {
-            VStack(spacing: 16) {
                 paintingWorkspace
-                    .frame(height: 520)
-                toolRail
-                pencilInspector
+                    .padding(12)
+
+                topBar
+                    .padding(.top, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                leftChrome
+                    .padding(.leading, 10)
+                    .padding(.top, 20)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+                rightChrome
+                    .padding(.trailing, 12)
+                    .padding(.top, 20)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+
+                bottomChrome
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
-            .padding(16)
+        }
+        .navigationBarHidden(true)
+        .background(Color.black)
+    }
+
+    private var workspaceBackground: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.10, green: 0.10, blue: 0.11),
+                Color(red: 0.07, green: 0.07, blue: 0.08)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            miniTopIcon("paintbrush.pointed.fill")
+
+            Text(store.selectedModel?.name ?? "Paint")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Button(store.selectedTool.title) {}
+                .buttonStyle(PaintTopCapsuleStyle(fill: Color.white.opacity(0.08)))
+
+            Button("Clear") {
+                store.clearSelectedModelPainting()
+            }
+            .buttonStyle(PaintTopCapsuleStyle(fill: Color.white.opacity(0.08)))
+
+            compactColorSwatch(store.activeProject.sliceSettings.surfaceColor)
+            compactColorSwatch(store.activeProject.sliceSettings.infillColor)
+
+            miniTopIcon("ellipsis")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private var leftChrome: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            chromeLabel(title: "Paint", systemName: "paintbrush.pointed") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showToolsPanel.toggle()
+                }
+            }
+            chromeLabel(title: "Colors", systemName: "paintpalette") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showColorPanel.toggle()
+                }
+            }
+            chromeLabel(title: "Models", systemName: "cube.transparent") {}
+
+            if showToolsPanel {
+                toolsPanel
+            }
+
+            Spacer()
+
+            chromeLabel(title: "Surface", systemName: "applepencil.tip") {}
+            chromeLabel(title: "Hover", systemName: "hand.draw") {}
         }
     }
 
-    private var toolRail: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            panelHeader("Tools", subtitle: "Double-tap cycles tools")
+    private var rightChrome: some View {
+        VStack(alignment: .trailing, spacing: 12) {
+            VStack(alignment: .trailing, spacing: 10) {
+                chromeLabel(title: "Pencil", systemName: "applepencil") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showPencilPanel.toggle()
+                    }
+                }
+                chromeLabel(title: "Pose", systemName: "gyroscope") {}
+                chromeLabel(title: "Session", systemName: "clock.arrow.circlepath") {}
+            }
 
+            if showPencilPanel {
+                pencilPanel
+            }
+
+            if showColorPanel {
+                colorPlanPanel
+            }
+
+            Spacer()
+        }
+    }
+
+    private var bottomChrome: some View {
+        HStack {
+            xyzDiagram
+
+            Spacer()
+
+            floatingStatus
+        }
+    }
+
+    private var toolsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(PaintingTool.allCases) { tool in
                 Button {
                     store.selectedTool = tool
                 } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: tool.systemImage)
-                            .frame(width: 28)
-                            .foregroundStyle(tool.tint)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(tool.title)
-                                .font(.headline)
-                            Text(tool == store.selectedTool ? "Active" : "Available")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    HStack(spacing: 10) {
+                        toolIcon(tool)
+                        Text(tool.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
                         Spacer()
                     }
-                    .padding(12)
-                    .background(store.selectedTool == tool ? tool.tint.opacity(0.18) : Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 16))
+                    .padding(8)
+                    .background(Color.white.opacity(store.selectedTool == tool ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
             }
 
             if store.pencilState.paletteVisible {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Quick Palette")
-                        .font(.headline)
-                    Text("Squeeze exposed the quick tool palette.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("Preferred tap: \(preferredTapActionLabel)")
-                    if #available(iOS 17.5, *) {
-                        Text("Preferred squeeze: \(preferredSqueezeActionLabel)")
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 16))
+                Text("Quick palette open")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.62))
             }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Color Plan")
-                    .font(.headline)
-
-                colorPickerRow(
-                    title: "Surface",
-                    subtitle: "Pencil paints only exterior faces",
-                    selection: $store.activeProject.sliceSettings.surfaceColor
-                )
-
-                colorPickerRow(
-                    title: "Infill",
-                    subtitle: "Separate choice to avoid accidental time increase",
-                    selection: $store.activeProject.sliceSettings.infillColor
-                )
-
-                Text("Interior infill is never painted by the Pencil surface tools.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 16))
-
-            Button("Clear painted marks") {
-                store.clearSelectedModelPainting()
-            }
-            .buttonStyle(.bordered)
-
-            Spacer()
         }
-        .padding(16)
-        .background(Color(red: 0.90, green: 0.91, blue: 0.88), in: RoundedRectangle(cornerRadius: 24))
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 200)
+    }
+
+    private var pencilPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            panelRow("Tool", store.selectedTool.title)
+            panelRow("Hover", store.pencilState.isHovering ? "Detected" : "Idle")
+            panelRow("Squeeze", store.pencilState.squeezeEnabled ? "Triggered" : "Idle")
+            panelRow("Double tap", "\(store.pencilState.doubleTapCount)")
+            panelRow("Pressure", String(format: "%.2f", store.pencilState.lastPressure))
+            panelRow("Roll", "\(Int(store.pencilState.barrelRollAngle * 180 / .pi)) deg")
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 220)
+    }
+
+    private var colorPlanPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            colorRow("Surface", store.activeProject.sliceSettings.surfaceColor)
+            colorRow("Infill", store.activeProject.sliceSettings.infillColor)
+            Text("Pencil paints only exterior surfaces.")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.58))
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 220)
     }
 
     private var paintingWorkspace: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28)
-                .fill(Color(red: 0.83, green: 0.85, blue: 0.82))
+        GeometryReader { geometry in
+            ZStack {
+                PaintingGrid()
+                    .clipShape(RoundedRectangle(cornerRadius: 28))
 
-            PaintingGrid()
-                .clipShape(RoundedRectangle(cornerRadius: 28))
+                mockModelStage
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                .padding(24)
+                paintSurfaceOverlay
 
-            paintSurfaceOverlay
+                if store.selectedModel != nil {
+                    ApplePencilCanvasView(
+                        onHoverChanged: { location, azimuth, altitude, zOffset, roll in
+                            store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                        },
+                        onStrokeBegan: { location, force, azimuth, roll in
+                            store.beginPaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
+                        },
+                        onStrokeMoved: { location, force, azimuth, roll in
+                            store.continuePaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
+                        },
+                        onStrokeEnded: {
+                            store.endPaintingStroke()
+                        },
+                        onTap: { location, azimuth, altitude, zOffset, roll in
+                            store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                            store.handlePencilDoubleTap()
+                        },
+                        onSqueeze: { location, azimuth, altitude, zOffset, roll in
+                            store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                            store.handlePencilSqueeze()
+                        }
+                    )
+                }
 
-            if store.selectedModel != nil {
-                ApplePencilCanvasView(
-                    onHoverChanged: { location, azimuth, altitude, zOffset, roll in
-                        store.handlePencilHover(
-                            location: location,
-                            azimuth: azimuth,
-                            altitude: altitude,
-                            zOffset: zOffset,
-                            roll: roll
-                        )
-                    },
-                    onStrokeBegan: { location, force, azimuth, roll in
-                        store.beginPaintingStroke(
-                            at: location,
-                            force: force,
-                            azimuth: azimuth,
-                            roll: roll
-                        )
-                    },
-                    onStrokeMoved: { location, force, azimuth, roll in
-                        store.continuePaintingStroke(
-                            at: location,
-                            force: force,
-                            azimuth: azimuth,
-                            roll: roll
-                        )
-                    },
-                    onStrokeEnded: {
-                        store.endPaintingStroke()
-                    },
-                    onTap: { location, azimuth, altitude, zOffset, roll in
-                        store.handlePencilHover(
-                            location: location,
-                            azimuth: azimuth,
-                            altitude: altitude,
-                            zOffset: zOffset,
-                            roll: roll
-                        )
-                        store.handlePencilDoubleTap()
-                    },
-                    onSqueeze: { location, azimuth, altitude, zOffset, roll in
-                        store.handlePencilHover(
-                            location: location,
-                            azimuth: azimuth,
-                            altitude: altitude,
-                            zOffset: zOffset,
-                            roll: roll
-                        )
-                        store.handlePencilSqueeze()
-                    }
-                )
+                if let selectedModel = store.selectedModel {
+                    Text(selectedModel.name)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.22), in: Capsule())
+                        .padding(.top, 72)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+
+                if store.selectedModel == nil {
+                    centerHint(
+                        icon: "cube.transparent",
+                        title: "Select a model in Slice first",
+                        subtitle: "Every loaded model stays in a 3D workspace, including Paint."
+                    )
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if store.selectedModel == nil {
+                    store.selectModel(store.selectedPlate?.models.first?.id)
+                }
             }
         }
-        .overlay(alignment: .topLeading) {
-            Text("Apple Pencil Pro Surface")
-                .font(.headline)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Color.black.opacity(0.75), in: Capsule())
-                .foregroundStyle(.white)
-                .padding(24)
+    }
+
+    private var mockModelStage: some View {
+        GeometryReader { geometry in
+            let center = CGPoint(x: geometry.size.width * 0.52, y: geometry.size.height * 0.52)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(Color.white.opacity(0.04), lineWidth: 1)
+                    .frame(width: 320, height: 220)
+                    .rotationEffect(.degrees(-12))
+                    .position(x: center.x, y: center.y + 60)
+
+                if store.selectedModel != nil {
+                    RoundedRectangle(cornerRadius: 22)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.9), store.activeProject.sliceSettings.surfaceColor.swatch.opacity(0.82)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 120, height: 170)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22)
+                                .stroke(Color.white.opacity(0.8), lineWidth: 2)
+                        )
+                        .rotation3DEffect(.degrees(18), axis: (x: 0, y: 1, z: 0))
+                        .position(x: center.x, y: center.y)
+
+                    selectionBracket
+                        .position(x: center.x, y: center.y)
+                }
+            }
         }
-        .shadow(color: .black.opacity(0.08), radius: 20, y: 10)
+    }
+
+    private var selectionBracket: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .stroke(style: StrokeStyle(lineWidth: 2, dash: [10, 8]))
+            .foregroundStyle(.white.opacity(0.9))
+            .frame(width: 150, height: 200)
     }
 
     private var paintSurfaceOverlay: some View {
@@ -218,105 +326,66 @@ struct ModelPaintingView: View {
                     )
                 }
 
-                if store.selectedModel == nil {
-                    VStack(spacing: 10) {
-                        Image(systemName: "cube.transparent")
-                            .font(.system(size: 40))
-                        Text("Select a model in the Slice workspace first.")
-                            .font(.headline)
-                        Text("Apple Pencil painting attaches to the currently selected model.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(24)
-                    .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 20))
-                    .frame(maxWidth: geometry.size.width * 0.66)
-                } else if store.selectedModelPaintingStrokes.isEmpty && store.activePaintingStroke == nil {
-                    VStack(spacing: 10) {
-                        Image(systemName: "applepencil.tip")
-                            .font(.system(size: 40))
-                        Text("Hover, tap, squeeze, and paint directly on the surface.")
-                            .font(.headline)
-                        Text("Double-tap cycles tools. Squeeze toggles the quick palette. Barrel roll rotates the brush indicator. Infill color is controlled separately.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(24)
-                    .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 20))
-                    .frame(maxWidth: geometry.size.width * 0.66)
+                if store.selectedModel != nil && store.selectedModelPaintingStrokes.isEmpty && store.activePaintingStroke == nil {
+                    centerHint(
+                        icon: "applepencil.tip",
+                        title: "Hover, squeeze, and paint in 3D",
+                        subtitle: "Touch stays for navigation. Apple Pencil edits the selected model surface."
+                    )
+                    .frame(maxWidth: geometry.size.width * 0.5)
                 }
             }
         }
     }
 
-    private var pencilInspector: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                panelHeader("Pencil", subtitle: "Hover, tap, squeeze, roll")
+    private var floatingStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(store.pencilState.lastEventSummary)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white)
 
-                statusCard(title: "Current Tool", value: store.selectedTool.title, accent: store.selectedTool.tint)
-                statusCard(title: "Surface Color", value: store.activeProject.sliceSettings.surfaceColor.displayName, accent: store.activeProject.sliceSettings.surfaceColor.swatch)
-                statusCard(title: "Infill Color", value: store.activeProject.sliceSettings.infillColor.displayName, accent: store.activeProject.sliceSettings.infillColor.swatch)
-                statusCard(title: "Hover", value: store.pencilState.isHovering ? "Detected" : "Idle", accent: .blue)
-                statusCard(title: "Squeeze", value: store.pencilState.squeezeEnabled ? "Triggered" : "Idle", accent: .orange)
-                statusCard(title: "Double Tap Count", value: "\(store.pencilState.doubleTapCount)", accent: .mint)
-
-                inspectorGroup("Painting Safety") {
-                    Text("Paint target: Surface only")
-                    Text("Infill color: \(store.activeProject.sliceSettings.infillColor.displayName)")
-                    Text("Changing infill is explicit so coloring the outside never silently adds hours of print time.")
-                }
-
-                if let selectedModel = store.selectedModel {
-                    inspectorGroup("Selected Workspace Model") {
-                        Text(selectedModel.name)
-                        Text("Surface marks \(store.selectedModelPaintingStrokes.count)")
-                        Text("Surface color \(store.activeProject.sliceSettings.surfaceColor.displayName)")
-                        Text("Infill color \(store.activeProject.sliceSettings.infillColor.displayName)")
-                    }
-                }
-
-                inspectorGroup("Pose") {
-                    Text("Roll \(Int(store.pencilState.barrelRollAngle * 180 / .pi)) deg")
-                    Text("Azimuth \(Int(store.pencilState.hoverAzimuthAngle * 180 / .pi)) deg")
-                    Text("Altitude \(Int(store.pencilState.hoverAltitudeAngle * 180 / .pi)) deg")
-                    Text("Z offset \(String(format: "%.2f", store.pencilState.hoverZOffset))")
-                    Text("Pressure \(String(format: "%.2f", store.pencilState.lastPressure))")
-                }
-
-                inspectorGroup("Session") {
-                    Text(store.pencilState.lastEventSummary)
-                    Text("Committed strokes \(store.selectedModelPaintingStrokes.count)")
-                    if let lastContactLocation = store.pencilState.lastContactLocation {
-                        Text("Last contact \(Int(lastContactLocation.x)), \(Int(lastContactLocation.y))")
-                    }
-                    if let hoverLocation = store.pencilState.hoverLocation {
-                        Text("Hover \(Int(hoverLocation.x)), \(Int(hoverLocation.y))")
-                    }
-                }
-
-                if store.pencilState.paletteVisible {
-                    inspectorGroup("Quick Palette") {
-                        ForEach(PaintingTool.allCases) { tool in
-                            HStack {
-                                Image(systemName: tool.systemImage)
-                                    .foregroundStyle(tool.tint)
-                                Text(tool.title)
-                                Spacer()
-                                if tool == store.selectedTool {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(tool.tint)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(16)
+            Text("Surface marks \(store.selectedModelPaintingStrokes.count)  Infill \(store.activeProject.sliceSettings.infillColor.displayName)")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.58))
         }
-        .background(Color(red: 0.90, green: 0.91, blue: 0.88), in: RoundedRectangle(cornerRadius: 24))
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 260, alignment: .leading)
+    }
+
+    private var xyzDiagram: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.black.opacity(0.32))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 1))
+
+            Canvas { context, size in
+                let origin = CGPoint(x: 20, y: size.height - 20)
+
+                var zAxis = Path()
+                zAxis.move(to: origin)
+                zAxis.addLine(to: CGPoint(x: origin.x, y: origin.y - 30))
+                context.stroke(zAxis, with: .color(.blue.opacity(0.9)), lineWidth: 2)
+
+                var xAxis = Path()
+                xAxis.move(to: origin)
+                xAxis.addLine(to: CGPoint(x: origin.x + 30, y: origin.y))
+                context.stroke(xAxis, with: .color(.red.opacity(0.9)), lineWidth: 2)
+
+                var yAxis = Path()
+                yAxis.move(to: origin)
+                yAxis.addLine(to: CGPoint(x: origin.x + 22, y: origin.y - 22))
+                context.stroke(yAxis, with: .color(.green.opacity(0.9)), lineWidth: 2)
+
+                context.draw(Text("Z").font(.caption.bold()).foregroundColor(.blue.opacity(0.95)), at: CGPoint(x: origin.x, y: origin.y - 40))
+                context.draw(Text("X").font(.caption.bold()).foregroundColor(.red.opacity(0.95)), at: CGPoint(x: origin.x + 40, y: origin.y))
+                context.draw(Text("Y").font(.caption.bold()).foregroundColor(.green.opacity(0.95)), at: CGPoint(x: origin.x + 30, y: origin.y - 28))
+            }
+            .padding(6)
+        }
+        .frame(width: 88, height: 88)
     }
 
     private func draw(stroke: PaintingStroke, in context: inout GraphicsContext) {
@@ -336,87 +405,87 @@ struct ModelPaintingView: View {
         )
     }
 
-    private func colorPickerRow(
-        title: String,
-        subtitle: String,
-        selection: Binding<PrintColorOption>
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func centerHint(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 34))
+                .foregroundStyle(.white.opacity(0.85))
             Text(title)
-                .font(.subheadline.weight(.semibold))
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Picker(title, selection: selection) {
-                ForEach(PrintColorOption.allCases) { color in
-                    HStack {
-                        Circle()
-                            .fill(color.swatch)
-                            .frame(width: 10, height: 10)
-                        Text(color.displayName)
-                    }
-                    .tag(color)
-                }
-            }
-        }
-    }
-
-    private func panelHeader(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.title3.weight(.semibold))
+                .font(.headline)
+                .foregroundStyle(.white)
             Text(subtitle)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.62))
+                .multilineTextAlignment(.center)
         }
+        .padding(22)
+        .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 18))
     }
 
-    private func inspectorGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline)
-            content()
+    private func chromeLabel(title: String, systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                roundIconBadge(systemName)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 18))
+        .buttonStyle(.plain)
     }
 
-    private func statusCard(title: String, value: String, accent: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func roundIconBadge(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.9))
+            .frame(width: 32, height: 32)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private func toolIcon(_ tool: PaintingTool) -> some View {
+        Image(systemName: tool.systemImage)
+            .foregroundStyle(tool.tint)
+            .frame(width: 22)
+    }
+
+    private func panelRow(_ title: String, _ value: String) -> some View {
+        HStack {
             Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.56))
+            Spacer()
             Text(value)
-                .font(.headline)
+                .foregroundStyle(.white)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 18))
+        .font(.caption2)
     }
 
-    private var preferredTapActionLabel: String {
-        actionLabel(for: UIPencilInteraction.preferredTapAction)
+    private func colorRow(_ title: String, _ color: PrintColorOption) -> some View {
+        HStack {
+            Circle()
+                .fill(color.swatch)
+                .frame(width: 10, height: 10)
+            Text(title)
+                .foregroundStyle(.white.opacity(0.62))
+            Spacer()
+            Text(color.displayName)
+                .foregroundStyle(.white)
+        }
+        .font(.caption2)
     }
 
-    private var preferredSqueezeActionLabel: String {
-        if #available(iOS 17.5, *) {
-            return actionLabel(for: UIPencilInteraction.preferredSqueezeAction)
-        }
-        return "Unavailable"
+    private func compactColorSwatch(_ color: PrintColorOption) -> some View {
+        Circle()
+            .fill(color.swatch)
+            .frame(width: 18, height: 18)
+            .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: 1))
     }
 
-    private func actionLabel(for action: UIPencilPreferredAction) -> String {
-        switch action {
-        case .ignore: return "Ignore"
-        case .switchEraser: return "Switch Eraser"
-        case .switchPrevious: return "Switch Previous"
-        case .showColorPalette: return "Show Color Palette"
-        case .showInkAttributes: return "Show Ink Attributes"
-        case .showContextualPalette: return "Show Contextual Palette"
-        case .runSystemShortcut: return "Run Shortcut"
-        @unknown default: return "Unknown"
-        }
+    private func miniTopIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.88))
+            .frame(width: 28, height: 28)
     }
 }
 
@@ -444,8 +513,8 @@ private struct HoverPreviewView: View {
 private struct PaintingGrid: View {
     var body: some View {
         Canvas { context, size in
-            let major = Color.black.opacity(0.10)
-            let minor = Color.black.opacity(0.04)
+            let major = Color.white.opacity(0.07)
+            let minor = Color.white.opacity(0.028)
 
             for x in stride(from: 0, through: size.width, by: 24) {
                 var path = Path()
@@ -465,15 +534,28 @@ private struct PaintingGrid: View {
                 var path = Path()
                 path.move(to: CGPoint(x: x, y: 0))
                 path.addLine(to: CGPoint(x: x, y: size.height))
-                context.stroke(path, with: .color(major), lineWidth: 1.25)
+                context.stroke(path, with: .color(major), lineWidth: 1.1)
             }
 
             for y in stride(from: 0, through: size.height, by: 96) {
                 var path = Path()
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(path, with: .color(major), lineWidth: 1.25)
+                context.stroke(path, with: .color(major), lineWidth: 1.1)
             }
         }
+    }
+}
+
+private struct PaintTopCapsuleStyle: ButtonStyle {
+    let fill: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.75 : 1))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(fill.opacity(configuration.isPressed ? 0.85 : 1), in: Capsule())
     }
 }
