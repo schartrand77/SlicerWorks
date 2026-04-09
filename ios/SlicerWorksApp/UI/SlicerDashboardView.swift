@@ -2,9 +2,10 @@ import SwiftUI
 
 struct SlicerDashboardView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var isLeftRailCollapsed = false
-    @State private var isRightInspectorCollapsed = false
-    @State private var isBottomStatusCollapsed = false
+    @State private var showItemsPanel = true
+    @State private var showAddPanel = false
+    @State private var showInspectorPanel = true
+    @State private var showColorPanel = true
 
     var body: some View {
         GeometryReader { geometry in
@@ -12,27 +13,40 @@ struct SlicerDashboardView: View {
                 workspaceBackground
 
                 plateWorkspace
-                    .padding(.horizontal, horizontalWorkspaceInset(for: geometry.size))
-                    .padding(.top, 88)
-                    .padding(.bottom, 74)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
 
-                topToolbar
-                    .padding(.horizontal, 18)
-                    .padding(.top, 12)
+                topProjectBar
+                    .padding(.top, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                edgeWidgets(for: geometry.size)
+                leftSideChrome
+                    .padding(.leading, 10)
+                    .padding(.top, 20)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+                rightSideChrome
+                    .padding(.trailing, 12)
+                    .padding(.top, 20)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+
+                bottomChrome
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
         }
         .navigationBarHidden(true)
-        .background(Color(red: 0.33, green: 0.34, blue: 0.38))
+        .background(Color.black)
     }
 
     private var workspaceBackground: some View {
         LinearGradient(
             colors: [
-                Color(red: 0.37, green: 0.38, blue: 0.42),
-                Color(red: 0.31, green: 0.32, blue: 0.36)
+                Color(red: 0.10, green: 0.10, blue: 0.11),
+                Color(red: 0.07, green: 0.07, blue: 0.08)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -40,361 +54,274 @@ struct SlicerDashboardView: View {
         .ignoresSafeArea()
     }
 
-    private var topToolbar: some View {
+    private var topProjectBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 10) {
-                workspaceModeChip(title: "Prepare", icon: "cube.transparent.fill", isActive: true)
-                workspaceModeChip(title: "Preview", icon: "square.stack.3d.up")
-                workspaceModeChip(title: "Devices", icon: "printer")
+            compactIconButton("house.fill")
+
+            TextField("Project name", text: $store.activeProject.name)
+                .textFieldStyle(.plain)
+                .foregroundStyle(.white)
+                .frame(width: 180)
+
+            Menu {
+                Picker("Quality", selection: $store.activeProject.sliceSettings.qualityPreset) {
+                    ForEach(SliceQualityPreset.allCases) { preset in
+                        Text(preset.displayName).tag(preset)
+                    }
+                }
+
+                Picker("Material", selection: $store.activeProject.sliceSettings.filamentMaterial) {
+                    ForEach(FilamentMaterial.allCases) { material in
+                        Text(material.displayName).tag(material)
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+
+            Button("Slice") {
+                Task { await store.prepareSlice() }
+            }
+            .buttonStyle(TopBarCapsuleStyle(fill: Color.white.opacity(0.08)))
+
+            Button("Print") {
+                Task { await store.pushLatestSliceToPrinter() }
+            }
+            .buttonStyle(TopBarCapsuleStyle(fill: Color.blue.opacity(0.88)))
+            .disabled(store.latestSliceResult == nil || store.sliceStatus.isWorking || store.uploadStatus.isWorking)
+
+            compactIconButton("ellipsis")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private var leftSideChrome: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            toolLabelStack(labels: [
+                ("Modeling", "cube"),
+                ("Visualization", "sparkles"),
+                ("Drawings", "doc.on.doc"),
+                ("Items", "square.stack.3d.up")
+            ]) {
+                if showItemsPanel {
+                    miniItemsPanel
+                }
+            } onTap: { label in
+                if label == "Items" {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showItemsPanel.toggle()
+                    }
+                }
             }
 
             Spacer()
 
-            Text(store.activeProject.name)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.96))
+            toolLabelStack(labels: [
+                ("Search", "magnifyingglass"),
+                ("Sketch", "scribble.variable"),
+                ("Add", "plus"),
+                ("Transform", "arrow.up.left.and.arrow.down.right"),
+                ("Tools", "wrench.and.screwdriver")
+            ]) {
+                if showAddPanel {
+                    miniAddPanel
+                }
+            } onTap: { label in
+                if label == "Add" {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showAddPanel.toggle()
+                    }
+                }
+            }
 
             Spacer()
 
-            HStack(spacing: 10) {
-                toolbarGlyph(systemName: "square.grid.2x2")
-                toolbarGlyph(systemName: "slider.horizontal.3")
+            VStack(alignment: .leading, spacing: 8) {
+                sideTagButton(title: "Section View", systemName: "square.split.2x1")
+                sideTagButton(title: "Measure", systemName: "ruler")
+            }
 
-                Button("Slice plate") {
-                    Task { await store.prepareSlice() }
-                }
-                .buttonStyle(WorkspaceCapsuleButtonStyle(fill: Color.white.opacity(0.14), foreground: .white))
-
-                Button("Print plate") {
-                    Task { await store.pushLatestSliceToPrinter() }
-                }
-                .buttonStyle(WorkspaceCapsuleButtonStyle(fill: Color.green.opacity(0.9), foreground: .white))
-                .disabled(store.latestSliceResult == nil || store.sliceStatus.isWorking || store.uploadStatus.isWorking)
+            HStack(spacing: 8) {
+                roundIconBadge("arrow.uturn.backward")
+                roundIconBadge("arrow.uturn.forward")
             }
         }
     }
 
-    private func edgeWidgets(for size: CGSize) -> some View {
-        ZStack {
-            VStack {
-                Spacer(minLength: 84)
+    private var rightSideChrome: some View {
+        VStack(alignment: .trailing, spacing: 12) {
+            orientationCube
 
-                HStack(alignment: .top, spacing: 14) {
-                    leftRail
-                    Spacer()
-                    rightInspector
+            VStack(alignment: .trailing, spacing: 8) {
+                sideTagButton(title: "Display", systemName: "circle.lefthalf.filled", alignedTrailing: true)
+                sideTagButton(title: "History", systemName: "clock.arrow.circlepath", alignedTrailing: true)
+                sideTagButton(title: "Colors", systemName: "paintpalette", alignedTrailing: true) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showColorPanel.toggle()
+                    }
                 }
+                sideTagButton(title: "Inspector", systemName: "slider.horizontal.3", alignedTrailing: true) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showInspectorPanel.toggle()
+                    }
+                }
+            }
 
+            if showInspectorPanel, let selectedModel = store.selectedModel {
+                floatingInfoCard(title: selectedModel.name) {
+                    infoLine("Position", "\(Int(selectedModel.position.x)), \(Int(selectedModel.position.y))")
+                    infoLine("Rotation", "\(Int(selectedModel.rotationDegrees)) deg")
+                    infoLine("Scale", "\(selectedModel.scalePercent)%")
+                    infoLine("Surface regions", "\(store.paintingStrokeCount(for: selectedModel.id))")
+                }
+            }
+
+            if showColorPanel {
+                floatingInfoCard(title: "Color Plan") {
+                    colorLine("Surface", store.activeProject.sliceSettings.surfaceColor)
+                    colorLine("Infill", store.activeProject.sliceSettings.infillColor)
+                    Text("Surface color is Pencil-driven. Infill stays explicit.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.58))
+                }
+            }
+
+            Spacer()
+        }
+    }
+
+    private var bottomChrome: some View {
+        HStack {
+            axisTile
+
+            Spacer()
+
+            floatingStatusCard
+        }
+    }
+
+    private var miniItemsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Workspace")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.72))
                 Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 18)
-
-            bottomStatus
-                .padding(.horizontal, 16)
-                .padding(.bottom, 18)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        }
-    }
-
-    private var leftRail: some View {
-        workspaceWidget(alignment: .leading, width: isLeftRailCollapsed ? 62 : 308) {
-            VStack(alignment: .leading, spacing: 14) {
-                railHeader(
-                    title: "Workspace",
-                    subtitle: store.selectedPrinter.displayName,
-                    isCollapsed: $isLeftRailCollapsed,
-                    collapseSystemImage: "sidebar.left"
-                )
-
-                if isLeftRailCollapsed == false {
-                    VStack(alignment: .leading, spacing: 14) {
-                        sectionCard(title: "Build Plates", trailing: {
-                            Button {
-                                store.addPlate()
-                            } label: {
-                                Image(systemName: "plus")
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.white)
-                        }) {
-                            ForEach(store.activeProject.plates) { plate in
-                                Button {
-                                    store.selectedPlateID = plate.id
-                                    store.selectedModelID = plate.models.first?.id
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        ZStack {
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(plateBadgeFill(isSelected: store.selectedPlateID == plate.id))
-                                            Text(plate.name.replacingOccurrences(of: "Plate ", with: ""))
-                                                .font(.caption.weight(.bold))
-                                                .foregroundStyle(.white)
-                                        }
-                                        .frame(width: 34, height: 42)
-
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(plate.name)
-                                                .font(.subheadline.weight(.semibold))
-                                                .foregroundStyle(.white)
-                                            Text("\(plate.models.count) model\(plate.models.count == 1 ? "" : "s")")
-                                                .font(.caption)
-                                                .foregroundStyle(.white.opacity(0.65))
-                                        }
-
-                                        Spacer()
-
-                                        if store.selectedPlateID == plate.id {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(.green)
-                                        }
-                                    }
-                                    .padding(10)
-                                    .background(widgetRowFill(isSelected: store.selectedPlateID == plate.id), in: RoundedRectangle(cornerRadius: 14))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-
-                        sectionCard(title: "Models", trailing: {
-                            Button {
-                                store.addSampleModel()
-                            } label: {
-                                Image(systemName: "square.stack.badge.plus")
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.white)
-                        }) {
-                            if let selectedPlate = store.selectedPlate, selectedPlate.models.isEmpty == false {
-                                ForEach(selectedPlate.models) { model in
-                                    Button {
-                                        store.selectModel(model.id)
-                                    } label: {
-                                        VStack(alignment: .leading, spacing: 5) {
-                                            HStack {
-                                                Text(model.name)
-                                                    .font(.subheadline.weight(.semibold))
-                                                    .foregroundStyle(.white)
-                                                Spacer()
-                                                Text("\(store.paintingStrokeCount(for: model.id)) marks")
-                                                    .font(.caption2.weight(.medium))
-                                                    .foregroundStyle(.green)
-                                            }
-
-                                            Text(model.sourceURL.lastPathComponent)
-                                                .font(.caption)
-                                                .foregroundStyle(.white.opacity(0.62))
-
-                                            Text("Scale \(model.scalePercent)%  Rot \(Int(model.rotationDegrees)) deg")
-                                                .font(.caption2)
-                                                .foregroundStyle(.white.opacity(0.62))
-                                        }
-                                        .padding(10)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(widgetRowFill(isSelected: store.selectedModelID == model.id), in: RoundedRectangle(cornerRadius: 14))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            } else {
-                                Text("No models on this plate yet.")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.65))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-
-                        if let selectedModel = store.selectedModel {
-                            sectionCard(title: "Selection") {
-                                Text(selectedModel.name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                Text("X \(Int(selectedModel.position.x))  Y \(Int(selectedModel.position.y))")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.62))
-                                Text("Touch selects. Apple Pencil edits surfaces in Paint.")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.62))
-                            }
-                        }
-                    }
-                } else {
-                    collapsedRailGlyphs(systemNames: ["square.grid.2x2", "square.stack.3d.up", "paintbrush"])
-                }
-            }
-        }
-    }
-
-    private var rightInspector: some View {
-        workspaceWidget(alignment: .trailing, width: isRightInspectorCollapsed ? 62 : 332) {
-            VStack(alignment: .leading, spacing: 14) {
-                railHeader(
-                    title: "Inspector",
-                    subtitle: "Transparent edge widget",
-                    isCollapsed: $isRightInspectorCollapsed,
-                    collapseSystemImage: "sidebar.right"
-                )
-
-                if isRightInspectorCollapsed == false {
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            sectionCard(title: "Project") {
-                                TextField("Project name", text: $store.activeProject.name)
-                                    .textFieldStyle(.plain)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-                                    .foregroundStyle(.white)
-
-                                labeledPicker("Quality", selection: $store.activeProject.sliceSettings.qualityPreset, options: SliceQualityPreset.allCases) { $0.displayName }
-                                labeledPicker("Material", selection: $store.activeProject.sliceSettings.filamentMaterial, options: FilamentMaterial.allCases) { $0.displayName }
-
-                                Button("Apply recommended preset") {
-                                    store.applyRecommendedSettings()
-                                }
-                                .buttonStyle(WorkspaceCapsuleButtonStyle(fill: Color.green.opacity(0.8), foreground: .white))
-                            }
-
-                            if let selectedModel = store.selectedModel {
-                                sectionCard(title: "Selected Model") {
-                                    Text(selectedModel.name)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                    Text(selectedModel.sourceURL.lastPathComponent)
-                                        .font(.caption)
-                                        .foregroundStyle(.white.opacity(0.65))
-                                    Text("Position \(Int(selectedModel.position.x)), \(Int(selectedModel.position.y))")
-                                        .font(.caption)
-                                        .foregroundStyle(.white.opacity(0.65))
-                                    Text("Rotation \(Int(selectedModel.rotationDegrees)) deg")
-                                        .font(.caption)
-                                        .foregroundStyle(.white.opacity(0.65))
-                                    Text("Scale \(selectedModel.scalePercent)%")
-                                        .font(.caption)
-                                        .foregroundStyle(.white.opacity(0.65))
-                                    Text("Surface paint regions \(store.paintingStrokeCount(for: selectedModel.id))")
-                                        .font(.caption)
-                                        .foregroundStyle(.green)
-                                }
-                            }
-
-                            sectionCard(title: "Color Plan") {
-                                colorPlanRow(title: "Surface", color: store.activeProject.sliceSettings.surfaceColor)
-                                colorPlanRow(title: "Infill", color: store.activeProject.sliceSettings.infillColor)
-                                Text("Surface color comes from Apple Pencil painting. Infill color is chosen explicitly so the inside never gets painted by mistake.")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.65))
-                            }
-
-                            sectionCard(title: "Shell and Infill") {
-                                metricStepper("Layer \(store.activeProject.sliceSettings.layerHeightMM.formatted(.number.precision(.fractionLength(2)))) mm", value: $store.activeProject.sliceSettings.layerHeightMM, range: store.selectedPrinter.minimumLayerHeightMM...store.selectedPrinter.maximumLayerHeightMM, step: 0.04)
-                                metricStepper("Walls \(store.activeProject.sliceSettings.wallLoopCount)", value: $store.activeProject.sliceSettings.wallLoopCount, range: 1...8, step: 1)
-                                metricStepper("Infill \(store.activeProject.sliceSettings.infillPercent)%", value: $store.activeProject.sliceSettings.infillPercent, range: 0...100, step: 5)
-
-                                labeledPicker("Pattern", selection: $store.activeProject.sliceSettings.infillPattern, options: InfillPattern.allCases) { $0.displayName }
-                            }
-
-                            sectionCard(title: "Thermals and Support") {
-                                metricStepper("Speed \(store.activeProject.sliceSettings.printSpeedMMPerSecond) mm/s", value: $store.activeProject.sliceSettings.printSpeedMMPerSecond, range: 30...store.selectedPrinter.maximumPrintSpeedMMPerSecond, step: 10)
-                                metricStepper("Nozzle \(store.activeProject.sliceSettings.nozzleTemperatureC) C", value: $store.activeProject.sliceSettings.nozzleTemperatureC, range: 180...300, step: 5)
-                                metricStepper("Bed \(store.activeProject.sliceSettings.bedTemperatureC) C", value: $store.activeProject.sliceSettings.bedTemperatureC, range: 0...110, step: 5)
-
-                                labeledPicker("Supports", selection: $store.activeProject.sliceSettings.supportStyle, options: SupportStyle.allCases) { $0.displayName }
-                                labeledPicker("Adhesion", selection: $store.activeProject.sliceSettings.adhesionType, options: AdhesionType.allCases) { $0.displayName }
-                            }
-                        }
-                    }
-                } else {
-                    collapsedRailGlyphs(systemNames: ["slider.horizontal.3", "paintpalette", "gearshape.2"])
-                }
-            }
-        }
-    }
-
-    private var bottomStatus: some View {
-        workspaceWidget(alignment: .bottom, width: isBottomStatusCollapsed ? 220 : 360) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label(store.sliceStatus.isWorking ? "Working" : "Slice status", systemImage: store.sliceStatus.isWorking ? "gearshape.2.fill" : "checkmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
+                Button {
+                    store.addPlate()
+                } label: {
+                    Image(systemName: "plus")
                         .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+            }
 
-                    Spacer()
+            ForEach(store.activeProject.plates) { plate in
+                Button {
+                    store.selectedPlateID = plate.id
+                    store.selectedModelID = plate.models.first?.id
+                } label: {
+                    HStack(spacing: 10) {
+                        roundedPlateBadge(plate.name.replacingOccurrences(of: "Plate ", with: ""), isSelected: store.selectedPlateID == plate.id)
 
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isBottomStatusCollapsed.toggle()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(plate.name)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                            Text("\(plate.models.count) model\(plate.models.count == 1 ? "" : "s")")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.55))
                         }
+                        Spacer()
+                    }
+                    .padding(8)
+                    .background(Color.white.opacity(store.selectedPlateID == plate.id ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let selectedPlate = store.selectedPlate {
+                ForEach(selectedPlate.models) { model in
+                    Button {
+                        store.selectModel(model.id)
                     } label: {
-                        Image(systemName: isBottomStatusCollapsed ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white.opacity(0.82))
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(model.name)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Text("\(store.paintingStrokeCount(for: model.id)) marks")
+                                    .font(.caption2)
+                                    .foregroundStyle(.green)
+                            }
+                            Spacer()
+                        }
+                        .padding(8)
+                        .background(Color.white.opacity(store.selectedModelID == model.id ? 0.12 : 0.03), in: RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain)
                 }
-
-                if isBottomStatusCollapsed == false {
-                    Text(store.sliceStatus.message)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-
-                    if let latestSliceResult = store.latestSliceResult {
-                        HStack(spacing: 16) {
-                            workspaceMetric(title: "Preset", value: latestSliceResult.selectedQualityPreset.displayName)
-                            workspaceMetric(title: "Time", value: "\(latestSliceResult.estimatedPrintTimeMinutes) min")
-                            workspaceMetric(title: "Filament", value: "\(latestSliceResult.estimatedFilamentGrams.formatted(.number.precision(.fractionLength(1)))) g")
-                        }
-                    }
-
-                    if store.projectValidationIssues.isEmpty == false {
-                        Text(store.projectValidationIssues.first?.message ?? "")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
             }
         }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 220)
+    }
+
+    private var miniAddPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button("Add Plate") {
+                store.addPlate()
+            }
+            .buttonStyle(PlainCapsuleActionStyle())
+
+            Button("Add Model") {
+                store.addSampleModel()
+            }
+            .buttonStyle(PlainCapsuleActionStyle())
+
+            Button("Recommended Preset") {
+                store.applyRecommendedSettings()
+            }
+            .buttonStyle(PlainCapsuleActionStyle())
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 180)
     }
 
     private var plateWorkspace: some View {
         GeometryReader { geometry in
             ZStack {
-                RoundedRectangle(cornerRadius: 32)
-                    .fill(Color.clear)
-
                 WorkspaceGrid()
-                    .clipShape(RoundedRectangle(cornerRadius: 32))
-
-                RoundedRectangle(cornerRadius: 28)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                    .padding(24)
+                    .clipShape(RoundedRectangle(cornerRadius: 28))
 
                 if let plate = store.selectedPlate {
-                    workspaceOverlay(for: plate)
-
-                    topToolStrip
-                        .padding(.top, 16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    if let selectedModel = store.selectedModel {
+                        Text(selectedModel.name)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.22), in: Capsule())
+                            .padding(.top, 72)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
 
                     ForEach(Array(plate.models.enumerated()), id: \.element.id) { index, model in
                         plateModelCard(model: model, index: index, size: geometry.size)
                     }
-
-                    bottomWorkspaceReadout
-                        .padding(.leading, 22)
-                        .padding(.bottom, 18)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "square.grid.3x3.middle.filled")
-                            .font(.system(size: 38))
-                            .foregroundStyle(.white.opacity(0.9))
-                        Text("Add a build plate to begin arranging parts.")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        Text("The workspace stays full-screen while tools remain off to the edges.")
-                            .font(.subheadline)
-                            .foregroundStyle(.white.opacity(0.65))
-                    }
+                    Text("Add a build plate to begin")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.75))
                 }
             }
             .contentShape(Rectangle())
@@ -402,290 +329,215 @@ struct SlicerDashboardView: View {
                 store.selectModel(nil)
             }
         }
-        .shadow(color: .black.opacity(0.22), radius: 22, y: 10)
-    }
-
-    private var topToolStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                workspaceToolGlyph("plus.viewfinder")
-                workspaceToolGlyph("move.3d")
-                workspaceToolGlyph("rotate.3d")
-                workspaceToolGlyph("scale.3d")
-                workspaceToolGlyph("scissors")
-                workspaceToolGlyph("paintbrush.pointed")
-                workspaceToolGlyph("eye")
-                workspaceToolGlyph("slider.horizontal.3")
-            }
-            .padding(.horizontal, 12)
-        }
-        .frame(height: 52)
-    }
-
-    private var bottomWorkspaceReadout: some View {
-        HStack(spacing: 12) {
-            axisTile
-            Label("Touch selects and orbits. Apple Pencil edits models and paints surfaces.", systemImage: "applepencil")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.74))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.22), in: Capsule())
-        }
-    }
-
-    private var axisTile: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Top")
-                .font(.caption2.weight(.bold))
-            Text("Front")
-                .font(.caption2)
-        }
-        .foregroundStyle(.white.opacity(0.82))
-        .padding(12)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func workspaceOverlay(for plate: BuildPlate) -> some View {
-        VStack {
-            HStack {
-                HStack(spacing: 10) {
-                    Text(plate.name)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-
-                    Text("\(plate.models.count) model\(plate.models.count == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.65))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.22), in: Capsule())
-
-                Spacer()
-
-                if let selectedModel = store.selectedModel {
-                    Text("Selected: \(selectedModel.name)")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color.black.opacity(0.22), in: Capsule())
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 20)
-
-            Spacer()
-        }
     }
 
     private func plateModelCard(model: PlacedModel, index: Int, size: CGSize) -> some View {
         let xOffset = CGFloat(model.position.x) + CGFloat(index * 28) - 48
         let yOffset = CGFloat(model.position.y) + CGFloat(index * 18) - 16
         let isSelected = store.selectedModelID == model.id
-        let strokeCount = store.paintingStrokeCount(for: model.id)
 
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(model.name)
-                .font(.headline)
-                .foregroundStyle(.white)
-            Text(model.sourceURL.lastPathComponent)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
-            Text("\(model.scalePercent)%  \(Int(model.rotationDegrees)) deg")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.64))
-            if strokeCount > 0 {
-                Text("\(strokeCount) painted surface region\(strokeCount == 1 ? "" : "s")")
-                    .font(.caption2)
-                    .foregroundStyle(.green.opacity(0.92))
-            }
+        return VStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 20)
+                .fill(
+                    LinearGradient(
+                        colors: isSelected
+                            ? [Color.white.opacity(0.92), Color.green.opacity(0.75)]
+                            : [Color.white.opacity(0.78), Color.gray.opacity(0.7)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(isSelected ? Color.white : Color.white.opacity(0.25), lineWidth: isSelected ? 2 : 1)
+                )
+                .frame(width: 88, height: 118)
+                .overlay(alignment: .bottom) {
+                    Text(model.name)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.black.opacity(0.7))
+                        .padding(.bottom, 10)
+                }
         }
-        .padding(14)
-        .frame(width: 176, alignment: .leading)
-        .background(widgetRowFill(isSelected: isSelected), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(isSelected ? Color.green.opacity(0.88) : Color.white.opacity(0.08), lineWidth: isSelected ? 2 : 1)
-        )
         .rotationEffect(.degrees(model.rotationDegrees))
         .scaleEffect(CGFloat(model.scalePercent) / 100)
         .position(
-            x: min(max(size.width * 0.5 + xOffset, 132), size.width - 132),
-            y: min(max(size.height * 0.5 + yOffset, 132), size.height - 132)
+            x: min(max(size.width * 0.5 + xOffset, 120), size.width - 120),
+            y: min(max(size.height * 0.5 + yOffset, 120), size.height - 120)
         )
+        .overlay(alignment: .bottomTrailing) {
+            if store.paintingStrokeCount(for: model.id) > 0 {
+                Text("\(store.paintingStrokeCount(for: model.id))")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(6)
+                    .background(Color.green.opacity(0.9), in: Circle())
+                    .offset(x: 18, y: 14)
+            }
+        }
         .onTapGesture {
             store.selectModel(model.id)
         }
     }
 
-    private func workspaceWidget<Content: View>(alignment: Alignment, width: CGFloat, @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .frame(width: width, alignment: .topLeading)
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.black.opacity(0.22))
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
-    }
+    private var orientationCube: some View {
+        VStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 56, height: 56)
+                .overlay(
+                    VStack(spacing: 2) {
+                        Text("Top")
+                            .font(.caption2.weight(.bold))
+                        Text("Right")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.white.opacity(0.8))
+                )
 
-    private func railHeader(title: String, subtitle: String, isCollapsed: Binding<Bool>, collapseSystemImage: String) -> some View {
-        HStack {
-            if isCollapsed.wrappedValue == false {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.64))
-                }
-            } else {
-                Image(systemName: collapseSystemImage)
-                    .foregroundStyle(.white.opacity(0.88))
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-
-            Spacer(minLength: isCollapsed.wrappedValue ? 0 : 8)
-
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isCollapsed.wrappedValue.toggle()
-                }
-            } label: {
-                Image(systemName: isCollapsed.wrappedValue ? "chevron.right" : "chevron.left")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.82))
-                    .frame(width: 28, height: 28)
-                    .background(Color.white.opacity(0.08), in: Circle())
-            }
-            .buttonStyle(.plain)
+            roundIconBadge("cube.transparent")
         }
     }
 
-    private func sectionCard<Content: View, Trailing: View>(title: String, @ViewBuilder trailing: () -> Trailing, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private var axisTile: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Top")
+                .font(.caption2.weight(.bold))
+            Text("Front")
+                .font(.caption2)
+        }
+        .foregroundStyle(.white.opacity(0.76))
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.06), lineWidth: 1))
+    }
+
+    private var floatingStatusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(title)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                trailing()
+                Image(systemName: store.sliceStatus.isWorking ? "gearshape.2.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(store.sliceStatus.message)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white)
             }
 
+            if let latestSliceResult = store.latestSliceResult {
+                Text("Preset \(latestSliceResult.selectedQualityPreset.displayName)  Time \(latestSliceResult.estimatedPrintTimeMinutes) min")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 250, alignment: .leading)
+    }
+
+    private func floatingInfoCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white.opacity(0.76))
             content()
         }
         .padding(12)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 220, alignment: .leading)
     }
 
-    private func sectionCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        sectionCard(title: title, trailing: { EmptyView() }, content: content)
+    private func infoLine(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.white.opacity(0.56))
+            Spacer()
+            Text(value)
+                .foregroundStyle(.white)
+        }
+        .font(.caption2)
     }
 
-    private func colorPlanRow(title: String, color: PrintColorOption) -> some View {
+    private func colorLine(_ label: String, _ color: PrintColorOption) -> some View {
         HStack {
             Circle()
                 .fill(color.swatch)
-                .frame(width: 14, height: 14)
-            Text(title)
-                .foregroundStyle(.white)
+                .frame(width: 10, height: 10)
+            Text(label)
+                .foregroundStyle(.white.opacity(0.62))
             Spacer()
             Text(color.displayName)
-                .foregroundStyle(.white.opacity(0.68))
-        }
-        .font(.caption)
-    }
-
-    private func workspaceModeChip(title: String, icon: String, isActive: Bool = false) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption.weight(.semibold))
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-        }
-        .foregroundStyle(.white.opacity(isActive ? 1 : 0.82))
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(isActive ? Color.green.opacity(0.8) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func toolbarGlyph(systemName: String) -> some View {
-        Image(systemName: systemName)
-            .foregroundStyle(.white.opacity(0.85))
-            .frame(width: 34, height: 34)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func workspaceToolGlyph(_ systemName: String) -> some View {
-        Image(systemName: systemName)
-            .foregroundStyle(.white.opacity(0.88))
-            .frame(width: 38, height: 38)
-            .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func workspaceMetric(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white.opacity(0.54))
-            Text(value)
-                .font(.caption.weight(.medium))
                 .foregroundStyle(.white)
         }
+        .font(.caption2)
     }
 
-    private func collapsedRailGlyphs(systemNames: [String]) -> some View {
-        VStack(spacing: 10) {
-            ForEach(systemNames, id: \.self) { systemName in
-                Image(systemName: systemName)
-                    .foregroundStyle(.white.opacity(0.84))
-                    .frame(width: 38, height: 38)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    private func toolLabelStack(labels: [(String, String)], @ViewBuilder overlay: () -> some View, onTap: @escaping (String) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(labels, id: \.0) { label, icon in
+                Button {
+                    onTap(label)
+                } label: {
+                    HStack(spacing: 10) {
+                        roundIconBadge(icon)
+                        Text(label)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+                .buttonStyle(.plain)
             }
+
+            overlay()
         }
-        .frame(maxWidth: .infinity)
     }
 
-    private func plateBadgeFill(isSelected: Bool) -> Color {
-        isSelected ? Color.green.opacity(0.9) : Color.white.opacity(0.14)
-    }
+    private func sideTagButton(title: String, systemName: String, alignedTrailing: Bool = false, action: (() -> Void)? = nil) -> some View {
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 8) {
+                if alignedTrailing == false {
+                    roundIconBadge(systemName)
+                }
 
-    private func widgetRowFill(isSelected: Bool) -> Color {
-        isSelected ? Color.green.opacity(0.18) : Color.white.opacity(0.04)
-    }
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
 
-    private func horizontalWorkspaceInset(for size: CGSize) -> CGFloat {
-        size.width > 900 ? 52 : 16
-    }
-
-    private func labeledPicker<Option: Hashable>(_ title: String, selection: Binding<Option>, options: [Option], titleForOption: @escaping (Option) -> String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white.opacity(0.7))
-
-            Picker(title, selection: selection) {
-                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                    Text(titleForOption(option)).tag(option)
+                if alignedTrailing {
+                    roundIconBadge(systemName)
                 }
             }
-            .pickerStyle(.menu)
-            .tint(.white)
         }
+        .buttonStyle(.plain)
     }
 
-    private func metricStepper<Value: Strideable>(_ title: String, value: Binding<Value>, range: ClosedRange<Value>, step: Value.Stride) -> some View where Value.Stride: SignedNumeric {
-        Stepper(title, value: value, in: range, step: step)
-            .font(.caption)
+    private func roundIconBadge(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.9))
+            .frame(width: 32, height: 32)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private func compactIconButton(_ systemName: String) -> some View {
+        Button {} label: {
+            Image(systemName: systemName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.88))
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func roundedPlateBadge(_ text: String, isSelected: Bool) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
             .foregroundStyle(.white)
+            .frame(width: 28, height: 36)
+            .background(isSelected ? Color.blue.opacity(0.9) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -693,13 +545,13 @@ private struct WorkspaceGrid: View {
     var body: some View {
         GeometryReader { _ in
             Canvas { context, size in
-                let major = Color.white.opacity(0.11)
-                let minor = Color.white.opacity(0.045)
+                let major = Color.white.opacity(0.07)
+                let minor = Color.white.opacity(0.028)
                 let majorSpacing: CGFloat = 84
                 let minorSpacing: CGFloat = 21
 
-                let backgroundRect = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 32)
-                context.fill(backgroundRect, with: .color(Color.black.opacity(0.1)))
+                let backgroundRect = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 28)
+                context.fill(backgroundRect, with: .color(Color.black.opacity(0.08)))
 
                 for x in stride(from: 0, through: size.width, by: minorSpacing) {
                     var path = Path()
@@ -719,40 +571,57 @@ private struct WorkspaceGrid: View {
                     var path = Path()
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
-                    context.stroke(path, with: .color(major), lineWidth: 1.15)
+                    context.stroke(path, with: .color(major), lineWidth: 1)
                 }
 
                 for y in stride(from: 0, through: size.height, by: majorSpacing) {
                     var path = Path()
                     path.move(to: CGPoint(x: 0, y: y))
                     path.addLine(to: CGPoint(x: size.width, y: y))
-                    context.stroke(path, with: .color(major), lineWidth: 1.15)
+                    context.stroke(path, with: .color(major), lineWidth: 1)
                 }
 
-                var centerX = Path()
-                centerX.move(to: CGPoint(x: size.width / 2, y: 0))
-                centerX.addLine(to: CGPoint(x: size.width / 2, y: size.height))
-                context.stroke(centerX, with: .color(.green.opacity(0.26)), lineWidth: 1.5)
+                var verticalAxis = Path()
+                verticalAxis.move(to: CGPoint(x: size.width * 0.34, y: 0))
+                verticalAxis.addLine(to: CGPoint(x: size.width * 0.34, y: size.height))
+                context.stroke(verticalAxis, with: .color(.blue.opacity(0.45)), lineWidth: 1.2)
 
-                var centerY = Path()
-                centerY.move(to: CGPoint(x: 0, y: size.height / 2))
-                centerY.addLine(to: CGPoint(x: size.width, y: size.height / 2))
-                context.stroke(centerY, with: .color(.green.opacity(0.26)), lineWidth: 1.5)
+                var diagonalAxis = Path()
+                diagonalAxis.move(to: CGPoint(x: size.width * 0.62, y: size.height))
+                diagonalAxis.addLine(to: CGPoint(x: size.width, y: size.height * 0.34))
+                context.stroke(diagonalAxis, with: .color(.green.opacity(0.45)), lineWidth: 1.2)
+
+                var horizontalAxis = Path()
+                horizontalAxis.move(to: CGPoint(x: size.width * 0.44, y: size.height * 0.78))
+                diagonalAxis = horizontalAxis
+                horizontalAxis.addLine(to: CGPoint(x: size.width * 0.72, y: size.height))
+                context.stroke(horizontalAxis, with: .color(.red.opacity(0.45)), lineWidth: 1.2)
             }
         }
     }
 }
 
-private struct WorkspaceCapsuleButtonStyle: ButtonStyle {
+private struct TopBarCapsuleStyle: ButtonStyle {
     let fill: Color
-    let foreground: Color
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(foreground.opacity(configuration.isPressed ? 0.82 : 1))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(fill.opacity(configuration.isPressed ? 0.8 : 1), in: Capsule())
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.75 : 1))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(fill.opacity(configuration.isPressed ? 0.85 : 1), in: Capsule())
+    }
+}
+
+private struct PlainCapsuleActionStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.72 : 1))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(configuration.isPressed ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 10))
     }
 }
