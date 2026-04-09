@@ -1,6 +1,6 @@
 import Foundation
 
-struct SliceProject: Identifiable, Equatable {
+struct SliceProject: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String
     var modelURL: URL
@@ -18,24 +18,36 @@ struct SliceProject: Identifiable, Equatable {
     )
 }
 
-struct MaterialAssignment: Equatable {
+struct MaterialAssignment: Equatable, Codable {
     var faceIdentifier: String
     var filament: Filament
 }
 
-struct Filament: Equatable {
+struct Filament: Equatable, Codable {
     var brand: String
     var material: String
     var colorHex: String
 }
 
-struct SliceResult: Equatable {
+struct SliceResult: Equatable, Codable {
     var gcodeURL: URL
     var estimatedPrintTimeMinutes: Int
     var estimatedFilamentGrams: Double
 }
 
-enum BambuPrinterProfile: String, CaseIterable, Identifiable {
+struct SliceProjectDocument: Equatable, Codable {
+    var project: SliceProject
+    var lastUsedPrinter: BambuPrinterProfile
+    var updatedAt: Date
+
+    static let example = SliceProjectDocument(
+        project: .example,
+        lastUsedPrinter: .x1Carbon,
+        updatedAt: .now
+    )
+}
+
+enum BambuPrinterProfile: String, CaseIterable, Identifiable, Codable {
     case a1
     case a1Mini
     case p1S

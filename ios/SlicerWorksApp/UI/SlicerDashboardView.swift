@@ -2,8 +2,6 @@ import SwiftUI
 
 struct SlicerDashboardView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var latestSliceResult: SliceResult?
-    @State private var status: String = "Ready"
 
     var body: some View {
         Form {
@@ -28,40 +26,45 @@ struct SlicerDashboardView: View {
             }
 
             Section("Actions") {
-                Button("Slice now") {
-                    Task {
-                        do {
-                            latestSliceResult = try await store.prepareSlice()
-                            status = "Sliced successfully"
-                        } catch {
-                            status = "Slice failed: \(error.localizedDescription)"
-                        }
-                    }
+                Button("Save project") {
+                    store.saveActiveProject()
                 }
+                .disabled(store.sliceStatus.isWorking || store.uploadStatus.isWorking)
+
+                Button("Slice now") {
+                    Task { await store.prepareSlice() }
+                }
+                .disabled(store.sliceStatus.isWorking || store.uploadStatus.isWorking)
 
                 Button("Upload to printer") {
-                    Task {
-                        guard let latestSliceResult else {
-                            status = "Slice first"
-                            return
-                        }
-
-                        do {
-                            try await store.pushToPrinter(latestSliceResult)
-                            status = "Upload queued"
-                        } catch {
-                            status = "Upload failed: \(error.localizedDescription)"
-                        }
-                    }
+                    Task { await store.pushLatestSliceToPrinter() }
                 }
-                .disabled(latestSliceResult == nil)
+                .disabled(store.latestSliceResult == nil || store.sliceStatus.isWorking || store.uploadStatus.isWorking)
             }
 
-            Section("Status") {
-                Text(status)
-                if let latestSliceResult {
+            Section("Slice Status") {
+                Text(store.sliceStatus.message)
+                if let latestSliceResult = store.latestSliceResult {
                     Text("Time: \(latestSliceResult.estimatedPrintTimeMinutes) min")
                     Text("Material: \(latestSliceResult.estimatedFilamentGrams.formatted()) g")
+                }
+            }
+
+            Section("Upload Status") {
+                Text(store.uploadStatus.message)
+            }
+
+            Section("Project Status") {
+                Text(store.projectStatus.message)
+            }
+
+            Section("Validation") {
+                if store.projectValidationIssues.isEmpty {
+                    Text("No validation issues")
+                } else {
+                    ForEach(store.projectValidationIssues) { issue in
+                        Text(issue.message)
+                    }
                 }
             }
         }
