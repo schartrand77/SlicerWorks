@@ -30,6 +30,7 @@ final class AppStore: ObservableObject {
     private let deviceGateway: BambuDeviceGateway
     private let projectRepository: ProjectRepository
     private let projectValidator: ProjectValidating
+    private let projectImporter: ProjectImporting
     private var isRestoringProject = false
     private var hasCompletedInitialLoad = false
 
@@ -39,6 +40,7 @@ final class AppStore: ObservableObject {
         self.deviceGateway = resolvedEnvironment.deviceGateway
         self.projectRepository = resolvedEnvironment.projectRepository
         self.projectValidator = resolvedEnvironment.projectValidator
+        self.projectImporter = resolvedEnvironment.projectImporter
         refreshProjectValidation()
     }
 
@@ -161,6 +163,26 @@ final class AppStore: ObservableObject {
         )
         activeProject.plates[selectedPlateIndex].models.append(model)
         selectedModelID = model.id
+    }
+
+    func importModels(from urls: [URL]) {
+        projectStatus = .working(message: "Importing \(urls.count) model\(urls.count == 1 ? "" : "s")...")
+
+        do {
+            let importedProject = try projectImporter.importModels(from: urls, into: activeProject)
+            activeProject = importedProject
+            selectedPlateID = importedProject.plates.first?.id
+            selectedModelID = importedProject.plates.first?.models.last?.id
+            projectStatus = .success(
+                message: "Imported \(urls.count) model\(urls.count == 1 ? "" : "s")"
+            )
+        } catch {
+            projectStatus = .failure(.projectImportFailed(reason: error.localizedDescription))
+        }
+    }
+
+    func projectImportDidFail(_ error: Error) {
+        projectStatus = .failure(.projectImportFailed(reason: error.localizedDescription))
     }
 
     func selectModel(_ modelID: PlacedModel.ID?) {

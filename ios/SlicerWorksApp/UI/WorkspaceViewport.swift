@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum WorkspaceInteractionMode: String {
     case orbit
@@ -24,6 +25,9 @@ enum WorkspaceInteractionMode: String {
 }
 
 struct WorkspaceCamera {
+    static let minimumZoom: CGFloat = 0.55
+    static let maximumZoom: CGFloat = 2.4
+
     var pitch: Double = 58
     var yaw: Double = -16
     var zoom: CGFloat = 1
@@ -36,6 +40,23 @@ struct WorkspaceCamera {
         zoom = 1
         pan = .zero
         interactionMode = .orbit
+    }
+
+    mutating func applyDrag(from start: WorkspaceCamera, translation: CGSize, in size: CGSize) {
+        switch interactionMode {
+        case .orbit:
+            yaw = start.yaw + Double(translation.width / max(size.width, 1)) * 140
+            pitch = start.pitch - Double(translation.height / max(size.height, 1)) * 120
+        case .pan:
+            pan = CGSize(
+                width: start.pan.width + translation.width,
+                height: start.pan.height + translation.height
+            )
+        }
+    }
+
+    mutating func applyMagnification(from startZoom: CGFloat, magnification: CGFloat) {
+        zoom = min(max(startZoom * magnification, Self.minimumZoom), Self.maximumZoom)
     }
 }
 
@@ -72,6 +93,11 @@ struct WorkspaceViewport<Background: View, Content: View>: View {
                 .rotation3DEffect(.degrees(camera.pitch), axis: (x: 1, y: 0, z: 0), perspective: 0.8)
                 .rotation3DEffect(.degrees(camera.yaw), axis: (x: 0, y: 1, z: 0), perspective: 0.8)
                 .shadow(color: .black.opacity(0.18), radius: 40, y: 22)
+
+                WorkspaceIndirectInputOverlay(
+                    camera: $camera,
+                    viewportSize: stageSize
+                )
             }
             .contentShape(Rectangle())
             .gesture(dragGesture(for: stageSize))
@@ -96,18 +122,7 @@ struct WorkspaceViewport<Background: View, Content: View>: View {
                 }
 
                 guard let start = dragStartCamera else { return }
-                let translation = value.translation
-
-                switch camera.interactionMode {
-                case .orbit:
-                    camera.yaw = start.yaw + Double(translation.width / max(size.width, 1)) * 140
-                    camera.pitch = start.pitch - Double(translation.height / max(size.height, 1)) * 120
-                case .pan:
-                    camera.pan = CGSize(
-                        width: start.pan.width + translation.width,
-                        height: start.pan.height + translation.height
-                    )
-                }
+                camera.applyDrag(from: start, translation: value.translation, in: size)
             }
             .onEnded { _ in
                 dragStartCamera = nil
@@ -122,11 +137,138 @@ struct WorkspaceViewport<Background: View, Content: View>: View {
                 }
 
                 let startZoom = magnifyStartZoom ?? camera.zoom
-                camera.zoom = min(max(startZoom * value.magnification, 0.55), 2.4)
+                camera.applyMagnification(from: startZoom, magnification: value.magnification)
             }
             .onEnded { _ in
                 magnifyStartZoom = nil
             }
+    }
+}
+
+struct WorkspaceIndirectInputOverlay: UIViewRepresentable {
+    @Binding var camera: WorkspaceCamera
+    let viewportSize: CGSize
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(camera: $camera, viewportSize: viewportSize)
+    }
+
+    func makeUIView(context: Context) -> WorkspaceIndirectInputView {
+        let view = WorkspaceIndirectInputView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ uiView: WorkspaceIndirectInputView, context: Context) {
+        context.coordinator.camera = $camera
+        context.coordinator.viewportSize = viewportSize
+        uiView.coordinator = context.coordinator
+    }
+
+    final class Coordinator {
+        var camera: Binding<WorkspaceCamera>
+        var viewportSize: CGSize
+        var dragStartCamera: WorkspaceCamera?
+        var magnifyStartZoom: CGFloat?
+
+        init(camera: Binding<WorkspaceCamera>, viewportSize: CGSize) {
+            self.camera = camera
+            self.viewportSize = viewportSize
+        }
+
+        func handlePanChanged(_ recognizer: UIPanGestureRecognizer) {
+            if dragStartCamera == nil {
+                dragStartCamera = camera.wrappedValue
+            }
+
+            guard let start = dragStartCamera else { return }
+            let translation = recognizer.translation(in: recognizer.view)
+            var updatedCamera = camera.wrappedValue
+            updatedCamera.applyDrag(
+                from: start,
+                translation: CGSize(width: translation.x, height: translation.y),
+                in: viewportSize
+            )
+            camera.wrappedValue = updatedCamera
+        }
+
+        func handlePanEnded() {
+            dragStartCamera = nil
+        }
+
+        func handlePinchChanged(_ recognizer: UIPinchGestureRecognizer) {
+            if magnifyStartZoom == nil {
+                magnifyStartZoom = camera.wrappedValue.zoom
+            }
+
+            let startZoom = magnifyStartZoom ?? camera.wrappedValue.zoom
+            var updatedCamera = camera.wrappedValue
+            updatedCamera.applyMagnification(from: startZoom, magnification: recognizer.scale)
+            camera.wrappedValue = updatedCamera
+        }
+
+        func handlePinchEnded() {
+            magnifyStartZoom = nil
+        }
+    }
+}
+
+final class WorkspaceIndirectInputView: UIView, UIGestureRecognizerDelegate {
+    var coordinator: WorkspaceIndirectInputOverlay.Coordinator?
+
+    private lazy var panGestureRecognizer: UIPanGestureRecognizer = {
+        let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+        recognizer.delegate = self
+        return recognizer
+    }()
+
+    private lazy var pinchGestureRecognizer: UIPinchGestureRecognizer = {
+        let recognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+        recognizer.delegate = self
+        return recognizer
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        addGestureRecognizer(panGestureRecognizer)
+        addGestureRecognizer(pinchGestureRecognizer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    @objc
+    private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        switch recognizer.state {
+        case .began, .changed:
+            coordinator?.handlePanChanged(recognizer)
+        default:
+            coordinator?.handlePanEnded()
+        }
+    }
+
+    @objc
+    private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+        switch recognizer.state {
+        case .began, .changed:
+            coordinator?.handlePinchChanged(recognizer)
+        default:
+            coordinator?.handlePinchEnded()
+        }
     }
 }
 
@@ -161,7 +303,7 @@ struct WorkspaceNavigationCluster: View {
                 navigationButton(mode: .orbit)
                 navigationButton(mode: .pan)
                 navigationActionButton("plus.magnifyingglass") {
-                    camera.zoom = min(camera.zoom + 0.14, 2.4)
+                    camera.zoom = min(camera.zoom + 0.14, WorkspaceCamera.maximumZoom)
                 }
                 navigationActionButton("arrow.counterclockwise") {
                     withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {

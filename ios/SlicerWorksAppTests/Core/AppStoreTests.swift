@@ -244,6 +244,56 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(savedModel.surfacePaintRegions.count, 1)
         XCTAssertEqual(savedModel.surfacePaintRegions.first?.points, [start, end])
     }
+
+    func testImportModelsAppendsImportedFilesAndSelectsLastModel() throws {
+        let importer = TestProjectImporter()
+        let repository = InMemoryProjectRepository()
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                projectRepository: repository,
+                projectValidator: DefaultProjectValidator(),
+                projectImporter: importer
+            )
+        )
+
+        store.loadLastProject()
+        store.importModels(from: [
+            URL(fileURLWithPath: "/tmp/bracket.stl"),
+            URL(fileURLWithPath: "/tmp/handle.obj")
+        ])
+
+        XCTAssertEqual(importer.importedURLs, [
+            URL(fileURLWithPath: "/tmp/bracket.stl"),
+            URL(fileURLWithPath: "/tmp/handle.obj")
+        ])
+        XCTAssertEqual(store.projectStatus, .success(message: "Imported 2 models"))
+        XCTAssertEqual(store.selectedPlate?.models.suffix(2).map(\.name), ["bracket", "handle"])
+        XCTAssertEqual(store.selectedModel?.name, "handle")
+
+        let savedDocument = try XCTUnwrap(repository.loadLastProject())
+        XCTAssertEqual(savedDocument.project.plates.first?.models.suffix(2).map(\.name), ["bracket", "handle"])
+    }
+
+    func testImportModelsFailureSetsProjectStatusFailure() {
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator(),
+                projectImporter: FailingProjectImporter()
+            )
+        )
+
+        store.importModels(from: [URL(fileURLWithPath: "/tmp/bad.unsupported")])
+
+        XCTAssertEqual(
+            store.projectStatus,
+            .failure(.projectImportFailed(reason: "Unsupported model format: .unsupported"))
+        )
+    }
 }
 
 private struct TestSlicerEngine: SlicerEngine {
@@ -257,6 +307,38 @@ private struct TestSlicerEngine: SlicerEngine {
 private struct FailingSlicerEngine: SlicerEngine {
     func slice(project: SliceProject, profile: BambuPrinterProfile) async throws -> SliceResult {
         throw TestError.slice
+    }
+}
+
+private final class TestProjectImporter: ProjectImporting {
+    var importedURLs: [URL] = []
+
+    func importModels(from urls: [URL], into project: SliceProject) throws -> SliceProject {
+        importedURLs = urls
+        var updatedProject = project
+        let existingModelCount = updatedProject.plates[0].models.count
+
+        for (index, url) in urls.enumerated() {
+            updatedProject.plates[0].models.append(
+                PlacedModel(
+                    id: UUID(),
+                    name: url.deletingPathExtension().lastPathComponent,
+                    sourceURL: url,
+                    position: PlatePosition(x: Double((existingModelCount + index) * 30), y: 0),
+                    rotationDegrees: 0,
+                    scalePercent: 100,
+                    surfacePaintRegions: []
+                )
+            )
+        }
+
+        return updatedProject
+    }
+}
+
+private struct FailingProjectImporter: ProjectImporting {
+    func importModels(from urls: [URL], into project: SliceProject) throws -> SliceProject {
+        throw ProjectImportError(message: "Unsupported model format: .unsupported")
     }
 }
 

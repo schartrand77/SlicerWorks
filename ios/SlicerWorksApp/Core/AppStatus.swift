@@ -30,6 +30,7 @@ enum AppError: LocalizedError, Equatable {
     case missingSliceResult
     case projectLoadFailed(reason: String)
     case projectSaveFailed(reason: String)
+    case projectImportFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -43,6 +44,8 @@ enum AppError: LocalizedError, Equatable {
             return "Project load failed: \(reason)"
         case let .projectSaveFailed(reason):
             return "Project save failed: \(reason)"
+        case let .projectImportFailed(reason):
+            return "Project import failed: \(reason)"
         }
     }
 }

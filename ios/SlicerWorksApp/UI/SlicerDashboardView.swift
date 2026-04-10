@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SlicerDashboardView: View {
     @EnvironmentObject private var store: AppStore
@@ -7,6 +8,7 @@ struct SlicerDashboardView: View {
     @State private var showInspectorPanel = true
     @State private var showColorPanel = true
     @State private var workspaceCamera = WorkspaceCamera()
+    @State private var isPresentingModelImporter = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -41,6 +43,18 @@ struct SlicerDashboardView: View {
         }
         .navigationBarHidden(true)
         .background(Color.black)
+        .fileImporter(
+            isPresented: $isPresentingModelImporter,
+            allowedContentTypes: [.slicerWorks3mf, .slicerWorksSTL, .slicerWorksOBJ],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case let .success(urls):
+                store.importModels(from: urls)
+            case let .failure(error):
+                store.projectImportDidFail(error)
+            }
+        }
     }
 
     private var workspaceBackground: some View {
@@ -84,6 +98,11 @@ struct SlicerDashboardView: View {
 
             Button("Slice") {
                 Task { await store.prepareSlice() }
+            }
+            .buttonStyle(TopBarCapsuleStyle(fill: Color.white.opacity(0.08)))
+
+            Button("Import") {
+                isPresentingModelImporter = true
             }
             .buttonStyle(TopBarCapsuleStyle(fill: Color.white.opacity(0.08)))
 
@@ -280,7 +299,7 @@ struct SlicerDashboardView: View {
             .buttonStyle(PlainCapsuleActionStyle())
 
             Button("Add Model") {
-                store.addSampleModel()
+                isPresentingModelImporter = true
             }
             .buttonStyle(PlainCapsuleActionStyle())
 
@@ -511,6 +530,12 @@ struct SlicerDashboardView: View {
             .frame(width: 28, height: 36)
             .background(isSelected ? Color.blue.opacity(0.9) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
+}
+
+private extension UTType {
+    static let slicerWorks3mf = UTType(filenameExtension: "3mf") ?? .data
+    static let slicerWorksSTL = UTType(filenameExtension: "stl") ?? .data
+    static let slicerWorksOBJ = UTType(filenameExtension: "obj") ?? .data
 }
 
 private struct WorkspaceGrid: View {

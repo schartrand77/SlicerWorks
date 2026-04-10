@@ -9,10 +9,12 @@ SlicerWorks is currently an early iPad-first SwiftUI scaffold with:
 - Bambu printer profile models for A1, A1 Mini, P1P, P1S, and X1 Carbon.
 - Mock slicing and printer upload abstractions.
 - Serializable project document, local persistence scaffolding, and autosave hooks.
+- Model import for `.3mf`, `.stl`, and `.obj` through the Slice workspace, with imported files copied into app storage.
 - Project validation for core settings and supported source formats.
-- Placeholder Apple Pencil Pro painting UI and tool model.
+- Apple Pencil Pro-oriented painting tool model with a gesture-driven placeholder viewport.
+- A runnable Xcode project and test targets in `ios/SlicerWorks`.
 
-The main gap is that the app shell exists, but the production-grade slicing, 3D interaction, file handling, and printer connectivity layers are still missing.
+The main gap is no longer basic app bootstrapping. The app can build inside the nested Xcode project, but the production-grade slicing, 3D interaction, file handling, and printer connectivity layers are still missing, and the repository now needs consolidation around one authoritative app target and source tree.
 
 ## Product Goal
 Ship an iPad-native slicer that is strong enough to replace desktop-first workflows for common Bambu printing tasks:
@@ -28,22 +30,25 @@ Ship an iPad-native slicer that is strong enough to replace desktop-first workfl
 - Build the model pipeline and persistence layer before deep UI polish.
 - Keep Bambu-first support tight before expanding printer compatibility.
 - Treat the 3D viewport as core infrastructure, not a visual enhancement.
+- Treat indirect input support as core UX: trackpad gestures should mirror touch behavior where the platform allows it.
 - Add tests around domain logic as soon as non-mock behavior appears.
 
 ## Phase 0: Foundation Hardening
-Target outcome: convert the scaffold into a buildable app foundation that can support real feature work.
+Target outcome: keep the runnable app foundation clean enough to support real feature work without duplicate implementation paths.
 
 ### Work items
-- Create a complete Xcode project/workspace with app target, schemes, and basic configuration.
+- Complete: create a complete Xcode project/workspace with app target, schemes, and basic configuration.
 - Complete: separate domain models, app services, and feature state to reduce future coupling in `AppStore`.
 - Complete: add dependency injection boundaries for slicer, file import, persistence, and printer networking services.
 - Complete: introduce error types and user-facing status models instead of raw strings in views.
-- In progress: establish a test target for domain and service-layer coverage.
+- Complete: establish XCTest-based test targets for core store and project domain behavior.
+- In progress: consolidate duplicate source trees so `ios/SlicerWorks` is the single runnable and editable app root.
+- In progress: wire test execution into a documented local command and CI-friendly path.
 
 ### Definition of done
-- App builds and runs from Xcode without manual project reconstruction.
+- App builds and runs from Xcode from a single canonical project layout.
 - Core services can be swapped between mock and real implementations cleanly.
-- Basic unit tests exist for project state, slicing requests, and printer selection logic, and are wired into a runnable target.
+- Basic unit tests exist for project state, slicing requests, and printer selection logic, and are runnable without ambiguous duplicate test suites.
 
 ## Current Test Coverage
 - `AppStatus` coverage for message rendering and working-state transitions.
@@ -51,22 +56,25 @@ Target outcome: convert the scaffold into a buildable app foundation that can su
 - `ProjectRepository` coverage for in-memory and `UserDefaults` document persistence round trips.
 - `ProjectValidator` coverage for core model/settings validation rules.
 
-The remaining gap is infrastructure: the repo still needs an actual Xcode test target or package-based test harness so the test suite can run in CI and locally without manual setup.
+The remaining gap is execution discipline rather than test absence: the repo needs one canonical test target location, documented commands for local runs, and CI so coverage does not drift as real integrations replace mocks.
 
 ## Phase 1: Project Import and Persistence
 Target outcome: users can open, save, and resume real print projects.
 
 ### Work items
-- Add file import for `.stl`, `.obj`, and `.3mf`.
+- Complete: add file import for `.stl`, `.obj`, and `.3mf`.
 - Complete: create a project document model that stores source assets, settings, and painting metadata.
 - Complete: implement local persistence scaffolding for recent projects and autosave.
 - In progress: add project validation for missing files, unsupported geometry, and incompatible printer bounds.
+- Add explicit import pipeline types so file parsing, mesh validation, and project creation can evolve independently.
 - Add undo/redo support for settings and painting operations.
+- Decide whether `.3mf` is first-class editable project format, interchange format, or both.
 
 ### Definition of done
 - A model can be imported from Files, saved, reopened, and resumed.
 - The app restores the last active project safely after restart.
 - Invalid or unsupported project states fail with actionable errors.
+- Imported assets have a stable internal representation that later viewport and slicer work can reuse.
 
 ## Phase 2: 3D Viewport and Interaction
 Target outcome: replace placeholders with a real iPad-native model interaction surface.
@@ -74,13 +82,16 @@ Target outcome: replace placeholders with a real iPad-native model interaction s
 ### Work items
 - Replace the placeholder painting surface with a Metal-backed viewport.
 - Add camera controls optimized for touch and Apple Pencil input.
+- Add trackpad and pointer gesture support for orbit, pan, and pinch-to-zoom behavior aligned with touch expectations.
 - Implement mesh loading, transforms, bounds display, and model positioning on the plate.
 - Support face picking, hit testing, and region highlighting.
 - Add selection overlays for paintable regions, seams, and support blockers.
+- Keep the current gesture semantics only as a temporary UX baseline; do not let the SwiftUI placeholder camera contract become the long-term rendering API.
 
 ### Definition of done
 - Imported models render smoothly on target iPad hardware.
 - Users can rotate, pan, zoom, and inspect geometry without input lag.
+- Trackpad users can navigate the viewport with the same core gesture vocabulary as touch users, including pinch zoom.
 - The viewport exposes reliable picking data for painting and analysis tools.
 
 ## Phase 3: Apple Pencil Pro Painting Workflow
@@ -107,6 +118,7 @@ Target outcome: generate real slice output for supported Bambu printer profiles.
 - Integrate a real slicing backend behind `SlicerEngine`.
 - Surface progress, cancellation, warnings, and slice result summaries.
 - Validate generated output against selected printer capabilities and project bounds.
+- Decide early whether the slicing backend is embedded native code, a wrapped existing engine, or a service boundary bridged into iPad app code.
 
 ### Definition of done
 - The app can produce real machine-ready output for at least one Bambu profile.
@@ -143,17 +155,62 @@ Target outcome: the app is stable enough for structured beta use.
 - Key regressions are caught by automated tests.
 - Beta users can complete the primary workflow without developer intervention.
 
+## Cross-Cutting Technical Tracks
+These tracks should move in parallel with the phase roadmap rather than waiting for a single late cleanup pass.
+
+### Repo and build hygiene
+- Consolidate duplicate app and test trees so roadmap work lands in one place.
+- Document the canonical Xcode scheme, simulator target, and test command.
+- Add CI to run unit tests on every branch once the canonical project layout is settled.
+
+### Domain model maturity
+- Separate import-time geometry data from user-authored project state.
+- Define stable identifiers for meshes, faces, paint regions, and slice presets.
+- Avoid letting UI placeholder types become de facto persistence formats.
+
+### Performance budgets
+- Set target budgets for model load time, viewport frame rate, and paint stroke latency.
+- Validate performance on a realistic iPad Pro target before deep feature layering.
+- Validate touch and trackpad interaction latency separately so indirect input does not become a second-class path.
+- Add lightweight instrumentation before optimization work starts.
+
+### Compatibility strategy
+- Keep Bambu-first support explicit in model and preset design.
+- Delay broad printer abstraction until one end-to-end Bambu workflow is reliable.
+- Treat `.3mf` fidelity and Bambu protocol behavior as active research items, not solved assumptions.
+
 ## Immediate Next Sprint
 Recommended next sequence for actual development:
 
-1. Create the real Xcode project and test target.
-2. Extend validation beyond core settings into imported geometry and printer bounds.
-3. Replace the viewport placeholder with a real render pipeline.
-4. Implement file import for `.stl`, `.obj`, and `.3mf`.
-5. Introduce structured slice settings and printer preset mapping.
-6. Start LAN device discovery only after a real slice artifact exists.
+1. Consolidate the repo so `ios/SlicerWorks` is the single canonical app and test target.
+2. Document and verify the local build/test path from that project.
+3. Implement file import for `.stl`, `.obj`, and `.3mf` into a stable internal project/mesh representation.
+4. Extend validation from core settings into imported geometry and printer bounds.
+5. Replace the placeholder viewport with a real render pipeline that can own picking and camera state.
+6. Introduce structured slice settings and printer preset mapping.
+7. Start LAN device discovery only after a real slice artifact exists.
+
+## Milestone View
+Use these checkpoints to decide whether the roadmap is still moving toward a shippable app rather than accumulating disconnected scaffolding.
+
+### Milestone A: Canonical foundation
+- One app target, one test suite location, one documented way to build and test.
+- Import-free demo project still works after consolidation.
+
+### Milestone B: First real model workflow
+- User imports a supported mesh, sees it in a real viewport, saves, reopens, and preserves project state.
+- Validation catches unsupported geometry before slicing starts.
+
+### Milestone C: First machine-ready slice
+- At least one Bambu profile generates a reproducible slice artifact with intelligible warnings.
+- Slice summaries and preset behavior are trustworthy enough for internal dogfooding.
+
+### Milestone D: First printer handoff
+- A sliced job is discoverable, selectable, and uploadable to a supported Bambu printer on LAN.
+- Failure states are visible and recoverable without restarting the app.
 
 ## Risks and Constraints
+- Duplicate source trees can waste roadmap effort if new work lands in the wrong app target.
 - Slicing backend integration may be the largest technical dependency.
 - Real-time mesh painting performance on iPad must be validated early.
 - Bambu protocol details and authentication behavior may constrain upload reliability.
