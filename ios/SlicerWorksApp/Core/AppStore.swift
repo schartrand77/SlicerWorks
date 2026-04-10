@@ -420,6 +420,14 @@ final class AppStore: ObservableObject {
         return knownLANPrinters.first(where: { $0.id == selectedLANPrinterID })
     }
 
+    var newlyDiscoveredLANPrinters: [BambuLANPrinter] {
+        discoveredLANPrinters.filter { discoveredPrinter in
+            knownLANPrinters.contains(where: { knownPrinter in
+                knownPrinter.serialNumber == discoveredPrinter.serialNumber || knownPrinter.host == discoveredPrinter.host
+            }) == false
+        }
+    }
+
     var selectedModel: PlacedModel? {
         guard let selectedPlateIndex,
               let selectedModelID,

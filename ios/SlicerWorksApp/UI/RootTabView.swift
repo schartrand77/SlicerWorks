@@ -2,12 +2,11 @@ import SwiftUI
 
 struct RootTabView: View {
     @EnvironmentObject private var store: AppStore
+    @State private var hasEnteredWorkspace = false
 
     var body: some View {
         Group {
-            if store.knownLANPrinters.isEmpty {
-                PrinterSetupLandingView()
-            } else {
+            if hasEnteredWorkspace {
                 TabView {
                     NavigationStack {
                         SlicerDashboardView()
@@ -33,6 +32,10 @@ struct RootTabView: View {
                 .tint(.blue)
                 .toolbarBackground(Color.black.opacity(0.92), for: .tabBar)
                 .toolbarBackground(.visible, for: .tabBar)
+            } else {
+                PrinterSetupLandingView {
+                    hasEnteredWorkspace = true
+                }
             }
         }
     }

@@ -233,7 +233,7 @@ struct SlicerDashboardView: View {
     private var bottomChrome: some View {
         HStack {
             if store.selectedLANPrinter == nil || store.knownLANPrinters.isEmpty == false || store.discoveredLANPrinters.isEmpty == false {
-                landingPrinterCard
+                printerStatusCard
             }
 
             Spacer()
@@ -242,10 +242,10 @@ struct SlicerDashboardView: View {
         }
     }
 
-    private var landingPrinterCard: some View {
+    private var printerStatusCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Bambu Printers", systemImage: "wifi")
+                Label("Printer Status", systemImage: "wifi")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white.opacity(0.78))
                 Spacer()
@@ -261,7 +261,7 @@ struct SlicerDashboardView: View {
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.62))
             } else {
-                Text("Add a printer on LAN so slicing can go straight to a Bambu device from the landing page.")
+                Text("Select a Bambu printer on LAN so sliced jobs can go straight to the device.")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.62))
             }
@@ -272,7 +272,7 @@ struct SlicerDashboardView: View {
                 }
                 .buttonStyle(PlainCapsuleActionStyle())
 
-                if let firstDiscoveredPrinter = store.discoveredLANPrinters.first {
+                if let firstDiscoveredPrinter = store.newlyDiscoveredLANPrinters.first ?? store.discoveredLANPrinters.first {
                     Button(store.knownLANPrinters.contains(where: { $0.serialNumber == firstDiscoveredPrinter.serialNumber }) ? "Use First Found" : "Add First Found") {
                         if let knownPrinter = store.knownLANPrinters.first(where: { $0.serialNumber == firstDiscoveredPrinter.serialNumber || $0.host == firstDiscoveredPrinter.host }) {
                             if knownPrinter.hasAccessCode {

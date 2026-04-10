@@ -13,6 +13,7 @@ SlicerWorks is currently an early iPad-first SwiftUI scaffold with:
 - Project validation for core settings and supported source formats.
 - Apple Pencil Pro-oriented painting tool model with a gesture-driven placeholder viewport.
 - LAN Bambu printer discovery, add/select flow, and local known-printer persistence scaffolding.
+- An always-on startup landing page that auto-scans LAN for newly detected Bambu printers, prompts for add with access code, and then hands off into the workspace.
 - A runnable Xcode project and test targets in `ios/SlicerWorks`.
 
 The main gap is no longer basic app bootstrapping. The app can build inside the nested Xcode project, but the production-grade slicing, 3D interaction, file handling, and printer connectivity layers are still missing, and the repository now needs consolidation around one authoritative app target and source tree.
@@ -131,6 +132,7 @@ Target outcome: a sliced job can move from iPad to printer with minimal friction
 
 ### Work items
 - Complete: implement local network discovery for compatible Bambu printers.
+- Complete: start every app session on a printer landing page that scans for newly detected LAN printers before entering the workspace.
 - Add authenticated printer connection and secure credential handling.
 - Show printer availability, selected device state, and upload progress.
 - Support send-to-printer flow for sliced jobs.

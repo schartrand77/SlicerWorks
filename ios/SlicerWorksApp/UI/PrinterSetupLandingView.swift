@@ -2,7 +2,10 @@ import SwiftUI
 
 struct PrinterSetupLandingView: View {
     @EnvironmentObject private var store: AppStore
+    let onEnterApp: () -> Void
+
     @State private var printerPendingAccessCodeEntry: BambuLANPrinter?
+    @State private var hasStartedInitialScan = false
 
     var body: some View {
         ZStack {
@@ -30,11 +33,11 @@ struct PrinterSetupLandingView: View {
                                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
                         )
 
-                    Text("Add Your Bambu Printer")
+                    Text("Check Your Bambu Printers")
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
 
-                    Text("SlicerWorks starts with printer setup so slicing and send-to-printer work from the first session. Scan your network, then enter the printer access code for Bambu LAN mode.")
+                    Text("SlicerWorks starts on this landing page every time. We scan your LAN for newly detected Bambu printers before you head into the workspace.")
                         .font(.body)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white.opacity(0.7))
@@ -52,31 +55,66 @@ struct PrinterSetupLandingView: View {
                             .foregroundStyle(.white.opacity(0.58))
                     }
 
-                    Button {
-                        Task { await store.discoverPrintersOnLAN() }
-                    } label: {
-                        HStack {
-                            Image(systemName: "wifi")
-                            Text("Scan Network for Bambu Printers")
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.blue.opacity(0.9), in: RoundedRectangle(cornerRadius: 16))
-                    }
-                    .buttonStyle(.plain)
-
-                    if store.discoveredLANPrinters.isEmpty {
-                        Text("No printers listed yet. Run a LAN scan to find available Bambu devices.")
+                    if store.newlyDiscoveredLANPrinters.isEmpty {
+                        Text(store.knownLANPrinters.isEmpty
+                            ? "No new Bambu printers were detected on the LAN. You can enter the app or run another scan."
+                            : "No additional Bambu printers were detected on the LAN. Your saved printers are ready, or you can run another scan."
+                        )
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.55))
+
+                        HStack(spacing: 12) {
+                            Button {
+                                Task { await store.discoverPrintersOnLAN() }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "wifi")
+                                    Text("Scan Again")
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(Color.blue.opacity(0.9), in: RoundedRectangle(cornerRadius: 16))
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                onEnterApp()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "arrow.right.circle")
+                                    Text("Enter App")
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     } else {
+                        Text("New Bambu printers were detected on the LAN. Add any printer you want to use in SlicerWorks.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.62))
+
                         VStack(spacing: 10) {
-                            ForEach(store.discoveredLANPrinters) { printer in
+                            ForEach(store.newlyDiscoveredLANPrinters) { printer in
                                 discoveredPrinterCard(printer)
                             }
                         }
+
+                        Button {
+                            onEnterApp()
+                        } label: {
+                            Text(store.knownLANPrinters.isEmpty ? "Skip For Now" : "Enter App")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 4)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(20)
@@ -96,6 +134,11 @@ struct PrinterSetupLandingView: View {
             BambuPrinterAccessCodeSheet(printer: printer) { accessCode in
                 store.addKnownLANPrinter(printer, accessCode: accessCode)
             }
+        }
+        .task {
+            guard hasStartedInitialScan == false else { return }
+            hasStartedInitialScan = true
+            await store.discoverPrintersOnLAN()
         }
     }
 

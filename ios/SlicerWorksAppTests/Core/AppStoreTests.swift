@@ -348,6 +348,23 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.discoveryStatus, .success(message: "Found 2 Bambu printers"))
     }
 
+    func testNewlyDiscoveredLANPrintersExcludeKnownDevices() async {
+        let gateway = RecordingDeviceGateway(discoveredPrinters: [.studioP1S, .deskA1Mini])
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: gateway,
+                knownPrinterStore: InMemoryKnownPrinterStore(printers: [.studioP1S]),
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+
+        await store.discoverPrintersOnLAN()
+
+        XCTAssertEqual(store.newlyDiscoveredLANPrinters, [.deskA1Mini])
+    }
+
     func testAddKnownLANPrinterPersistsSelectionAndProfile() throws {
         let printerStore = InMemoryKnownPrinterStore()
         let store = AppStore(
