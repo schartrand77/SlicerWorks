@@ -268,6 +268,20 @@ struct SliceProjectDocument: Equatable, Codable {
     )
 }
 
+struct BambuLANPrinter: Identifiable, Equatable, Codable {
+    let id: UUID
+    var name: String
+    var host: String
+    var serialNumber: String
+    var profile: BambuPrinterProfile
+    var accessCode: String?
+
+    var hasAccessCode: Bool {
+        guard let accessCode else { return false }
+        return accessCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+}
+
 enum BambuPrinterProfile: String, CaseIterable, Identifiable, Codable {
     case a1
     case a1Mini

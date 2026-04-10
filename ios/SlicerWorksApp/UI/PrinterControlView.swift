@@ -5,6 +5,8 @@ struct PrinterControlView: View {
     @State private var showStatusPanel = true
     @State private var showMaterialsPanel = true
     @State private var workspaceCamera = WorkspaceCamera()
+    @State private var printerPendingAccessCodeEntry: BambuLANPrinter?
+    @State private var printerPendingAccessCodeEdit: BambuLANPrinter?
 
     var body: some View {
         GeometryReader { _ in
@@ -38,6 +40,19 @@ struct PrinterControlView: View {
         }
         .navigationBarHidden(true)
         .background(Color.black)
+        .sheet(item: $printerPendingAccessCodeEntry) { printer in
+            BambuPrinterAccessCodeSheet(printer: printer) { accessCode in
+                store.addKnownLANPrinter(printer, accessCode: accessCode)
+            }
+        }
+        .sheet(item: $printerPendingAccessCodeEdit) { printer in
+            BambuPrinterAccessCodeSheet(
+                printer: printer,
+                initialAccessCode: printer.accessCode ?? ""
+            ) { accessCode in
+                store.updateLANPrinterAccessCode(printer.id, accessCode: accessCode)
+            }
+        }
     }
 
     private var workspaceBackground: some View {
@@ -55,13 +70,15 @@ struct PrinterControlView: View {
     private var topBar: some View {
         HStack(spacing: 12) {
             miniTopIcon("printer.fill")
-            Text(store.selectedPrinter.displayName)
+            Text(store.selectedLANPrinter?.name ?? store.selectedPrinter.displayName)
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white)
+            Button("Discover") {
+                Task { await store.discoverPrintersOnLAN() }
+            }
+            .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
             Button("Status") {}
-                .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
-            Button("Calibration") {}
-                .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
+            .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
             Button("Queue") {}
                 .buttonStyle(DeviceCapsuleStyle(fill: Color.blue.opacity(0.88)))
         }
@@ -102,10 +119,26 @@ struct PrinterControlView: View {
                 materialsPanel
             }
 
+            floatingInfoCard(title: "Discovered on LAN") {
+                if store.discoveredLANPrinters.isEmpty {
+                    Text("Run Discover to search for nearby Bambu printers.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.58))
+                } else {
+                    ForEach(store.discoveredLANPrinters) { printer in
+                        discoveredPrinterRow(printer)
+                    }
+                }
+            }
+            .frame(width: 260, alignment: .leading)
+
             floatingInfoCard(title: "Controls") {
-                deviceRow("LAN discovery", "Active")
+                deviceRow("LAN discovery", store.discoveryStatus.message)
                 deviceRow("Cloud queue", "Future")
                 deviceRow("AMS sync", "Ready")
+                if let selectedLANPrinter = store.selectedLANPrinter {
+                    deviceRow("Access code", selectedLANPrinter.hasAccessCode ? "Saved" : "Required")
+                }
             }
 
             Spacer()
@@ -115,8 +148,10 @@ struct PrinterControlView: View {
     private var bottomChrome: some View {
         HStack {
             floatingInfoCard(title: "Printer") {
-                deviceRow("Selected", store.selectedPrinter.displayName)
-                deviceRow("Mode", "3D device workspace")
+                deviceRow("Selected", store.selectedLANPrinter?.name ?? "None")
+                deviceRow("Profile", store.selectedPrinter.displayName)
+                deviceRow("Host", store.selectedLANPrinter?.host ?? "Scan LAN")
+                deviceRow("Access code", store.selectedLANPrinter?.hasAccessCode == true ? "Saved" : "Required")
             }
             .frame(width: 240, alignment: .leading)
             Spacer()
@@ -158,7 +193,7 @@ struct PrinterControlView: View {
 
     private var statusPanel: some View {
         floatingInfoCard(title: "Bambu Lab") {
-            deviceRow("LAN discovery", "Enabled")
+            deviceRow("LAN discovery", store.discoveryStatus.message)
             deviceRow("Cloud queue", "Future")
             deviceRow("AMS filament sync", "Available")
         }
@@ -172,6 +207,41 @@ struct PrinterControlView: View {
             deviceRow("ABS", "Empty")
         }
         .frame(width: 220, alignment: .leading)
+    }
+
+    private func discoveredPrinterRow(_ printer: BambuLANPrinter) -> some View {
+        let isKnown = store.knownLANPrinters.contains(where: { $0.id == printer.id || $0.serialNumber == printer.serialNumber })
+        let isSelected = store.selectedLANPrinterID == printer.id
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(printer.name)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text("\(printer.profile.displayName)  \(printer.host)")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.58))
+                }
+                Spacer()
+                Button(isKnown ? (isSelected ? "Selected" : "Use") : "Add") {
+                    if isKnown {
+                        if let knownPrinter = store.knownLANPrinters.first(where: { $0.serialNumber == printer.serialNumber || $0.host == printer.host }) {
+                            if knownPrinter.hasAccessCode {
+                                store.selectLANPrinter(knownPrinter.id)
+                            } else {
+                                printerPendingAccessCodeEdit = knownPrinter
+                            }
+                        }
+                    } else {
+                        printerPendingAccessCodeEntry = printer
+                    }
+                }
+                .buttonStyle(DevicePillActionStyle(fill: isSelected ? Color.blue.opacity(0.9) : Color.white.opacity(0.1)))
+            }
+        }
+        .padding(8)
+        .background(Color.white.opacity(isSelected ? 0.10 : 0.04), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var orientationCluster: some View {
@@ -240,6 +310,19 @@ struct PrinterControlView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 22))
         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.06), lineWidth: 1))
+    }
+}
+
+private struct DevicePillActionStyle: ButtonStyle {
+    let fill: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(configuration.isPressed ? 0.75 : 1))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(fill.opacity(configuration.isPressed ? 0.8 : 1), in: Capsule())
     }
 }
 

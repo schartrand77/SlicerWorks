@@ -28,9 +28,13 @@ enum AppError: LocalizedError, Equatable {
     case sliceFailed(reason: String)
     case uploadFailed(reason: String)
     case missingSliceResult
+    case missingPrinterSelection
+    case missingPrinterAccessCode
     case projectLoadFailed(reason: String)
     case projectSaveFailed(reason: String)
     case projectImportFailed(reason: String)
+    case printerDiscoveryFailed(reason: String)
+    case printerSaveFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -40,12 +44,20 @@ enum AppError: LocalizedError, Equatable {
             return "Upload failed: \(reason)"
         case .missingSliceResult:
             return "Slice the project before uploading"
+        case .missingPrinterSelection:
+            return "Add and select a Bambu printer on LAN before uploading"
+        case .missingPrinterAccessCode:
+            return "Enter the printer access code before using Bambu LAN mode"
         case let .projectLoadFailed(reason):
             return "Project load failed: \(reason)"
         case let .projectSaveFailed(reason):
             return "Project save failed: \(reason)"
         case let .projectImportFailed(reason):
             return "Project import failed: \(reason)"
+        case let .printerDiscoveryFailed(reason):
+            return "Printer discovery failed: \(reason)"
+        case let .printerSaveFailed(reason):
+            return "Printer save failed: \(reason)"
         }
     }
 }

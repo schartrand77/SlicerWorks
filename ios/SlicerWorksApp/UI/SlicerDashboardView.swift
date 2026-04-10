@@ -9,6 +9,8 @@ struct SlicerDashboardView: View {
     @State private var showColorPanel = true
     @State private var workspaceCamera = WorkspaceCamera()
     @State private var isPresentingModelImporter = false
+    @State private var printerPendingAccessCodeEntry: BambuLANPrinter?
+    @State private var printerPendingAccessCodeEdit: BambuLANPrinter?
 
     var body: some View {
         GeometryReader { geometry in
@@ -53,6 +55,19 @@ struct SlicerDashboardView: View {
                 store.importModels(from: urls)
             case let .failure(error):
                 store.projectImportDidFail(error)
+            }
+        }
+        .sheet(item: $printerPendingAccessCodeEntry) { printer in
+            BambuPrinterAccessCodeSheet(printer: printer) { accessCode in
+                store.addKnownLANPrinter(printer, accessCode: accessCode)
+            }
+        }
+        .sheet(item: $printerPendingAccessCodeEdit) { printer in
+            BambuPrinterAccessCodeSheet(
+                printer: printer,
+                initialAccessCode: printer.accessCode ?? ""
+            ) { accessCode in
+                store.updateLANPrinterAccessCode(printer.id, accessCode: accessCode)
             }
         }
     }
@@ -217,9 +232,106 @@ struct SlicerDashboardView: View {
 
     private var bottomChrome: some View {
         HStack {
+            if store.selectedLANPrinter == nil || store.knownLANPrinters.isEmpty == false || store.discoveredLANPrinters.isEmpty == false {
+                landingPrinterCard
+            }
+
+            Spacer()
             Spacer()
             floatingStatusCard
         }
+    }
+
+    private var landingPrinterCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Bambu Printers", systemImage: "wifi")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.78))
+                Spacer()
+                if let selectedPrinter = store.selectedLANPrinter {
+                    Text(selectedPrinter.name)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green.opacity(0.95))
+                }
+            }
+
+            if let selectedPrinter = store.selectedLANPrinter {
+                Text("\(selectedPrinter.profile.displayName) on \(selectedPrinter.host)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.62))
+            } else {
+                Text("Add a printer on LAN so slicing can go straight to a Bambu device from the landing page.")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+
+            HStack(spacing: 8) {
+                Button("Discover") {
+                    Task { await store.discoverPrintersOnLAN() }
+                }
+                .buttonStyle(PlainCapsuleActionStyle())
+
+                if let firstDiscoveredPrinter = store.discoveredLANPrinters.first {
+                    Button(store.knownLANPrinters.contains(where: { $0.serialNumber == firstDiscoveredPrinter.serialNumber }) ? "Use First Found" : "Add First Found") {
+                        if let knownPrinter = store.knownLANPrinters.first(where: { $0.serialNumber == firstDiscoveredPrinter.serialNumber || $0.host == firstDiscoveredPrinter.host }) {
+                            if knownPrinter.hasAccessCode {
+                                store.selectLANPrinter(knownPrinter.id)
+                            } else {
+                                printerPendingAccessCodeEdit = knownPrinter
+                            }
+                        } else {
+                            printerPendingAccessCodeEntry = firstDiscoveredPrinter
+                        }
+                    }
+                    .buttonStyle(PlainCapsuleActionStyle())
+                }
+            }
+
+            if store.knownLANPrinters.isEmpty == false {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(store.knownLANPrinters.prefix(2)) { printer in
+                        Button {
+                            store.selectLANPrinter(printer.id)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(printer.name)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                    Text("\(printer.profile.displayName)  \(printer.host)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.55))
+                                }
+                                Spacer()
+                                if store.selectedLANPrinterID == printer.id {
+                                    Text("Selected")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.green.opacity(0.95))
+                                } else if printer.hasAccessCode == false {
+                                    Text("Needs code")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.yellow.opacity(0.95))
+                                }
+                            }
+                            .padding(8)
+                            .background(Color.white.opacity(store.selectedLANPrinterID == printer.id ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if let selectedPrinter = store.selectedLANPrinter {
+                Text(selectedPrinter.hasAccessCode ? "LAN access code saved" : "LAN access code required")
+                    .font(.caption2)
+                    .foregroundStyle(selectedPrinter.hasAccessCode ? .green.opacity(0.95) : .yellow.opacity(0.95))
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .frame(width: 320, alignment: .leading)
     }
 
     private var miniItemsPanel: some View {

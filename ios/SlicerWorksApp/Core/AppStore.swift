@@ -12,6 +12,7 @@ final class AppStore: ObservableObject {
             handleProjectStateChange()
         }
     }
+    @Published var selectedLANPrinterID: BambuLANPrinter.ID?
     @Published var activeProject: SliceProject = .example {
         didSet {
             handleProjectStateChange()
@@ -24,10 +25,14 @@ final class AppStore: ObservableObject {
     @Published private(set) var sliceStatus: AppStatus = .idle(message: "Ready")
     @Published private(set) var uploadStatus: AppStatus = .idle(message: "No upload yet")
     @Published private(set) var projectStatus: AppStatus = .idle(message: "Example project loaded")
+    @Published private(set) var discoveryStatus: AppStatus = .idle(message: "No LAN scan yet")
     @Published private(set) var projectValidationIssues: [ProjectValidationIssue] = []
+    @Published private(set) var knownLANPrinters: [BambuLANPrinter] = []
+    @Published private(set) var discoveredLANPrinters: [BambuLANPrinter] = []
 
     private let slicerEngine: SlicerEngine
     private let deviceGateway: BambuDeviceGateway
+    private let knownPrinterStore: KnownPrinterStoring
     private let projectRepository: ProjectRepository
     private let projectValidator: ProjectValidating
     private let projectImporter: ProjectImporting
@@ -38,9 +43,11 @@ final class AppStore: ObservableObject {
         let resolvedEnvironment = environment ?? .live
         self.slicerEngine = resolvedEnvironment.slicerEngine
         self.deviceGateway = resolvedEnvironment.deviceGateway
+        self.knownPrinterStore = resolvedEnvironment.knownPrinterStore
         self.projectRepository = resolvedEnvironment.projectRepository
         self.projectValidator = resolvedEnvironment.projectValidator
         self.projectImporter = resolvedEnvironment.projectImporter
+        restoreKnownPrinters()
         refreshProjectValidation()
     }
 
@@ -64,14 +71,82 @@ final class AppStore: ObservableObject {
             return
         }
 
-        uploadStatus = .working(message: "Uploading to \(selectedPrinter.displayName)...")
+        guard let selectedLANPrinter else {
+            uploadStatus = .failure(.missingPrinterSelection)
+            return
+        }
+
+        guard selectedLANPrinter.hasAccessCode else {
+            uploadStatus = .failure(.missingPrinterAccessCode)
+            return
+        }
+
+        uploadStatus = .working(message: "Uploading to \(selectedLANPrinter.name)...")
 
         do {
-            try await deviceGateway.upload(result: latestSliceResult, to: selectedPrinter)
+            try await deviceGateway.upload(result: latestSliceResult, to: selectedLANPrinter)
             uploadStatus = .success(message: "Upload queued")
         } catch {
             uploadStatus = .failure(.uploadFailed(reason: error.localizedDescription))
         }
+    }
+
+    func discoverPrintersOnLAN() async {
+        discoveryStatus = .working(message: "Scanning LAN for Bambu printers...")
+
+        do {
+            let printers = try await deviceGateway.discoverPrinters()
+            discoveredLANPrinters = printers
+            discoveryStatus = .success(
+                message: printers.isEmpty
+                    ? "No Bambu printers found on LAN"
+                    : "Found \(printers.count) Bambu printer\(printers.count == 1 ? "" : "s")"
+            )
+        } catch {
+            discoveryStatus = .failure(.printerDiscoveryFailed(reason: error.localizedDescription))
+        }
+    }
+
+    func addKnownLANPrinter(_ printer: BambuLANPrinter, accessCode: String) {
+        let normalizedAccessCode = accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existingPrinter = knownLANPrinters.first(where: { $0.serialNumber == printer.serialNumber || $0.host == printer.host })
+
+        if let existingPrinter,
+           let index = knownLANPrinters.firstIndex(where: { $0.id == existingPrinter.id }) {
+            knownLANPrinters[index].name = printer.name
+            knownLANPrinters[index].host = printer.host
+            knownLANPrinters[index].serialNumber = printer.serialNumber
+            knownLANPrinters[index].profile = printer.profile
+            knownLANPrinters[index].accessCode = normalizedAccessCode
+        } else {
+            var storedPrinter = printer
+            storedPrinter.accessCode = normalizedAccessCode
+            knownLANPrinters.append(storedPrinter)
+        }
+
+        selectLANPrinter(existingPrinter?.id ?? printer.id)
+        persistKnownPrinters()
+    }
+
+    func updateLANPrinterAccessCode(_ printerID: BambuLANPrinter.ID, accessCode: String) {
+        guard let index = knownLANPrinters.firstIndex(where: { $0.id == printerID }) else {
+            return
+        }
+
+        knownLANPrinters[index].accessCode = accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        persistKnownPrinters()
+        discoveryStatus = .success(message: "Updated access code for \(knownLANPrinters[index].name)")
+    }
+
+    func selectLANPrinter(_ printerID: BambuLANPrinter.ID?) {
+        selectedLANPrinterID = printerID
+
+        guard let selectedLANPrinter else {
+            return
+        }
+
+        selectedPrinter = selectedLANPrinter.profile
+        discoveryStatus = .success(message: "Selected \(selectedLANPrinter.name)")
     }
 
     func loadLastProject() {
@@ -340,6 +415,11 @@ final class AppStore: ObservableObject {
         return activeProject.plates[selectedPlateIndex]
     }
 
+    var selectedLANPrinter: BambuLANPrinter? {
+        guard let selectedLANPrinterID else { return nil }
+        return knownLANPrinters.first(where: { $0.id == selectedLANPrinterID })
+    }
+
     var selectedModel: PlacedModel? {
         guard let selectedPlateIndex,
               let selectedModelID,
@@ -427,6 +507,27 @@ final class AppStore: ObservableObject {
             sliceStatus = .idle(message: "Settings changed. Slice to refresh estimates.")
         }
         uploadStatus = .idle(message: "No upload yet")
+    }
+
+    private func restoreKnownPrinters() {
+        do {
+            knownLANPrinters = try knownPrinterStore.loadPrinters()
+            if let firstPrinter = knownLANPrinters.first {
+                selectedLANPrinterID = firstPrinter.id
+                selectedPrinter = firstPrinter.profile
+                discoveryStatus = .idle(message: "Loaded \(knownLANPrinters.count) saved printer\(knownLANPrinters.count == 1 ? "" : "s")")
+            }
+        } catch {
+            discoveryStatus = .failure(.printerDiscoveryFailed(reason: error.localizedDescription))
+        }
+    }
+
+    private func persistKnownPrinters() {
+        do {
+            try knownPrinterStore.savePrinters(knownLANPrinters)
+        } catch {
+            discoveryStatus = .failure(.printerSaveFailed(reason: error.localizedDescription))
+        }
     }
 }
 

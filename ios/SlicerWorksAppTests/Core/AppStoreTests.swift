@@ -75,6 +75,26 @@ final class AppStoreTests: XCTestCase {
             environment: AppEnvironment(
                 slicerEngine: TestSlicerEngine(result: result),
                 deviceGateway: deviceGateway,
+                knownPrinterStore: InMemoryKnownPrinterStore(printers: [.studioP1S]),
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+
+        store.selectLANPrinter(BambuLANPrinter.studioP1S.id)
+        await store.prepareSlice()
+        await store.pushLatestSliceToPrinter()
+
+        XCTAssertEqual(deviceGateway.uploadedResult, result)
+        XCTAssertEqual(deviceGateway.uploadedPrinter, .studioP1S)
+        XCTAssertEqual(store.uploadStatus, .success(message: "Upload queued"))
+    }
+
+    func testUploadWithoutSelectedLANPrinterSetsFailureStatus() async {
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
                 projectRepository: InMemoryProjectRepository(),
                 projectValidator: DefaultProjectValidator()
             )
@@ -83,9 +103,25 @@ final class AppStoreTests: XCTestCase {
         await store.prepareSlice()
         await store.pushLatestSliceToPrinter()
 
-        XCTAssertEqual(deviceGateway.uploadedResult, result)
-        XCTAssertEqual(deviceGateway.uploadedPrinter, store.selectedPrinter)
-        XCTAssertEqual(store.uploadStatus, .success(message: "Upload queued"))
+        XCTAssertEqual(store.uploadStatus, .failure(.missingPrinterSelection))
+    }
+
+    func testUploadWithoutPrinterAccessCodeSetsFailureStatus() async {
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                knownPrinterStore: InMemoryKnownPrinterStore(printers: [.studioP1SWithoutCode]),
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+
+        store.selectLANPrinter(BambuLANPrinter.studioP1SWithoutCode.id)
+        await store.prepareSlice()
+        await store.pushLatestSliceToPrinter()
+
+        XCTAssertEqual(store.uploadStatus, .failure(.missingPrinterAccessCode))
     }
 
     func testLoadLastProjectRestoresProjectAndPrinter() {
@@ -294,6 +330,61 @@ final class AppStoreTests: XCTestCase {
             .failure(.projectImportFailed(reason: "Unsupported model format: .unsupported"))
         )
     }
+
+    func testDiscoverPrintersOnLANStoresDiscoveredDevices() async {
+        let gateway = RecordingDeviceGateway(discoveredPrinters: [.studioP1S, .deskA1Mini])
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: gateway,
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+
+        await store.discoverPrintersOnLAN()
+
+        XCTAssertEqual(store.discoveredLANPrinters, [.studioP1S, .deskA1Mini])
+        XCTAssertEqual(store.discoveryStatus, .success(message: "Found 2 Bambu printers"))
+    }
+
+    func testAddKnownLANPrinterPersistsSelectionAndProfile() throws {
+        let printerStore = InMemoryKnownPrinterStore()
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                knownPrinterStore: printerStore,
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+
+        store.addKnownLANPrinter(.studioP1SWithoutCode, accessCode: "12345678")
+
+        XCTAssertEqual(store.knownLANPrinters, [.studioP1S])
+        XCTAssertEqual(store.selectedLANPrinter, .studioP1S)
+        XCTAssertEqual(store.selectedPrinter, .p1S)
+        XCTAssertEqual(try printerStore.loadPrinters(), [.studioP1S])
+    }
+
+    func testUpdateLANPrinterAccessCodePersistsCode() throws {
+        let printerStore = InMemoryKnownPrinterStore(printers: [.studioP1SWithoutCode])
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                knownPrinterStore: printerStore,
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+
+        store.updateLANPrinterAccessCode(BambuLANPrinter.studioP1SWithoutCode.id, accessCode: "updated-code")
+
+        XCTAssertEqual(store.knownLANPrinters.first?.accessCode, "updated-code")
+        XCTAssertEqual(try printerStore.loadPrinters().first?.accessCode, "updated-code")
+    }
 }
 
 private struct TestSlicerEngine: SlicerEngine {
@@ -343,10 +434,19 @@ private struct FailingProjectImporter: ProjectImporting {
 }
 
 private final class RecordingDeviceGateway: BambuDeviceGateway {
+    let discoveredPrinters: [BambuLANPrinter]
     private(set) var uploadedResult: SliceResult?
-    private(set) var uploadedPrinter: BambuPrinterProfile?
+    private(set) var uploadedPrinter: BambuLANPrinter?
 
-    func upload(result: SliceResult, to printer: BambuPrinterProfile) async throws {
+    init(discoveredPrinters: [BambuLANPrinter] = []) {
+        self.discoveredPrinters = discoveredPrinters
+    }
+
+    func discoverPrinters() async throws -> [BambuLANPrinter] {
+        discoveredPrinters
+    }
+
+    func upload(result: SliceResult, to printer: BambuLANPrinter) async throws {
         uploadedResult = result
         uploadedPrinter = printer
     }
@@ -390,5 +490,34 @@ private extension SliceResult {
         estimatedFilamentMeters: 5.87,
         selectedQualityPreset: .balanced,
         selectedMaterial: .pla
+    )
+}
+
+private extension BambuLANPrinter {
+    static let studioP1S = BambuLANPrinter(
+        id: UUID(uuidString: "DCA733BA-B59D-480A-8350-54950901E001") ?? UUID(),
+        name: "Studio P1S",
+        host: "192.168.1.42",
+        serialNumber: "P1S-LAB-042",
+        profile: .p1S,
+        accessCode: "12345678"
+    )
+
+    static let studioP1SWithoutCode = BambuLANPrinter(
+        id: UUID(uuidString: "DCA733BA-B59D-480A-8350-54950901E001") ?? UUID(),
+        name: "Studio P1S",
+        host: "192.168.1.42",
+        serialNumber: "P1S-LAB-042",
+        profile: .p1S,
+        accessCode: nil
+    )
+
+    static let deskA1Mini = BambuLANPrinter(
+        id: UUID(uuidString: "DCA733BA-B59D-480A-8350-54950901E002") ?? UUID(),
+        name: "Desk A1 Mini",
+        host: "192.168.1.57",
+        serialNumber: "A1M-LAB-057",
+        profile: .a1Mini,
+        accessCode: "A1MINI42"
     )
 }
