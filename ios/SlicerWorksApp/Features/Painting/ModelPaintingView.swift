@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ModelPaintingView: View {
     @EnvironmentObject private var store: AppStore
+    @Binding var selectedSection: WorkspaceSection
     @State private var showToolsPanel = true
     @State private var showColorPanel = true
     @State private var showPencilPanel = true
@@ -21,13 +22,13 @@ struct ModelPaintingView: View {
 
                 leftChrome
                     .padding(.leading, 10)
-                    .padding(.top, 20)
+                    .padding(.top, 88)
                     .padding(.bottom, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
                 rightChrome
                     .padding(.trailing, 12)
-                    .padding(.top, 20)
+                    .padding(.top, 88)
                     .padding(.bottom, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
 
@@ -55,6 +56,8 @@ struct ModelPaintingView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
+            WorkspaceSectionPicker(selectedSection: $selectedSection)
+
             miniTopIcon("paintbrush.pointed.fill")
 
             Text(store.selectedModel?.name ?? "Paint")

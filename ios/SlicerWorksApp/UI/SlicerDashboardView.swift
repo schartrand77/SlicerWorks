@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct SlicerDashboardView: View {
     @EnvironmentObject private var store: AppStore
+    @Binding var selectedSection: WorkspaceSection
     @State private var showItemsPanel = true
     @State private var showAddPanel = false
     @State private var showInspectorPanel = true
@@ -32,13 +33,13 @@ struct SlicerDashboardView: View {
 
                 leftSideChrome
                     .padding(.leading, 10)
-                    .padding(.top, 20)
+                    .padding(.top, 88)
                     .padding(.bottom, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
                 rightSideChrome
                     .padding(.trailing, 12)
-                    .padding(.top, 20)
+                    .padding(.top, 126)
                     .padding(.bottom, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
 
@@ -91,6 +92,8 @@ struct SlicerDashboardView: View {
 
     private var topProjectBar: some View {
         HStack(spacing: 12) {
+            WorkspaceSectionPicker(selectedSection: $selectedSection)
+
             compactIconButton("house.fill")
 
             TextField("Project name", text: $store.activeProject.name)

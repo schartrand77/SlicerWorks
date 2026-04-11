@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PrinterControlView: View {
     @EnvironmentObject private var store: AppStore
+    @Binding var selectedSection: WorkspaceSection
     @State private var showStatusPanel = true
     @State private var showMaterialsPanel = true
     @State private var workspaceCamera = WorkspaceCamera()
@@ -22,13 +23,13 @@ struct PrinterControlView: View {
 
                 leftChrome
                     .padding(.leading, 10)
-                    .padding(.top, 20)
+                    .padding(.top, 88)
                     .padding(.bottom, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
                 rightChrome
                     .padding(.trailing, 12)
-                    .padding(.top, 20)
+                    .padding(.top, 88)
                     .padding(.bottom, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
 
@@ -69,6 +70,8 @@ struct PrinterControlView: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
+            WorkspaceSectionPicker(selectedSection: $selectedSection)
+
             miniTopIcon("printer.fill")
             Text(store.selectedLANPrinter?.name ?? store.selectedPrinter.displayName)
                 .font(.headline.weight(.semibold))
