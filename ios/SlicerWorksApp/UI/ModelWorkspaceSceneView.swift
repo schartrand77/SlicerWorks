@@ -14,6 +14,7 @@ enum ModelWorkspaceContextAction {
 }
 
 struct ModelWorkspaceSceneView: UIViewRepresentable {
+    @Binding var camera: WorkspaceCamera
     let models: [PlacedModel]
     let selectedModelID: PlacedModel.ID?
     let surfaceColor: PrintColorOption
@@ -22,6 +23,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
+            camera: $camera,
             selectedModelID: selectedModelID,
             onSelectModel: onSelectModel,
             onContextAction: onContextAction
@@ -33,6 +35,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         view.backgroundColor = .clear
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = false
+        view.delegate = context.coordinator
         view.scene = makeScene(context: context)
 
         let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
@@ -98,6 +101,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
+        context.coordinator.camera = $camera
         context.coordinator.selectedModelID = selectedModelID
         context.coordinator.onSelectModel = onSelectModel
         context.coordinator.onContextAction = onContextAction
@@ -406,6 +410,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
     final class Coordinator: NSObject {
         static let secondaryClickGestureName = "ModelWorkspaceSceneView.secondaryClick"
 
+        var camera: Binding<WorkspaceCamera>
         weak var sceneView: SCNView?
         weak var cameraNode: SCNNode?
         weak var modelRootNode: SCNNode?
@@ -426,10 +431,12 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         var onContextAction: (ModelWorkspaceContextAction) -> Void
 
         init(
+            camera: Binding<WorkspaceCamera>,
             selectedModelID: PlacedModel.ID?,
             onSelectModel: @escaping (PlacedModel.ID?) -> Void,
             onContextAction: @escaping (ModelWorkspaceContextAction) -> Void
         ) {
+            self.camera = camera
             self.selectedModelID = selectedModelID
             self.onSelectModel = onSelectModel
             self.onContextAction = onContextAction
@@ -693,6 +700,32 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 current.z * distanceRatio
             )
         }
+
+        func syncCameraStateFromScene() {
+            guard let pointOfView = sceneView?.pointOfView ?? cameraNode else { return }
+
+            let eulerAngles = pointOfView.presentation.eulerAngles
+            let nextPitch = -Double(eulerAngles.x) * 180 / .pi
+            let nextYaw = Double(eulerAngles.y) * 180 / .pi
+            let currentCamera = camera.wrappedValue
+            guard abs(currentCamera.pitch - nextPitch) > 0.25 || abs(currentCamera.yaw - nextYaw) > 0.25 else {
+                return
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                var updatedCamera = self.camera.wrappedValue
+                updatedCamera.pitch = nextPitch
+                updatedCamera.yaw = nextYaw
+                self.camera.wrappedValue = updatedCamera
+            }
+        }
+    }
+}
+
+extension ModelWorkspaceSceneView.Coordinator: SCNSceneRendererDelegate {
+    func renderer(_ renderer: any SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        syncCameraStateFromScene()
     }
 }
 

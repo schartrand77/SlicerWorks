@@ -312,7 +312,6 @@ struct WorkspaceNavigationCluster: View {
                 }
             }
 
-            WorkspaceXYZDiagram(camera: camera)
         }
     }
 
@@ -371,32 +370,59 @@ struct WorkspaceXYZDiagram: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.1), lineWidth: 1))
 
             Canvas { context, size in
-                let origin = CGPoint(x: 22, y: size.height - 20)
-                let xLength: CGFloat = 30 * camera.zoom
-                let yLength: CGFloat = 24 * camera.zoom
-                let zLength: CGFloat = 30 * camera.zoom
+                let origin = CGPoint(x: size.width * 0.5, y: size.height * 0.58)
+                let axisLength: CGFloat = 31
+                let xAxisPoint = projectedAxisEndpoint(axis: (x: 1, y: 0, z: 0), origin: origin, length: axisLength)
+                let yAxisPoint = projectedAxisEndpoint(axis: (x: 0, y: 0, z: 1), origin: origin, length: axisLength)
+                let zAxisPoint = projectedAxisEndpoint(axis: (x: 0, y: 1, z: 0), origin: origin, length: axisLength)
 
                 var zAxis = Path()
                 zAxis.move(to: origin)
-                zAxis.addLine(to: CGPoint(x: origin.x, y: origin.y - zLength))
+                zAxis.addLine(to: zAxisPoint)
                 context.stroke(zAxis, with: .color(.blue.opacity(0.9)), lineWidth: 2)
 
                 var xAxis = Path()
                 xAxis.move(to: origin)
-                xAxis.addLine(to: CGPoint(x: origin.x + xLength, y: origin.y))
+                xAxis.addLine(to: xAxisPoint)
                 context.stroke(xAxis, with: .color(.red.opacity(0.9)), lineWidth: 2)
 
                 var yAxis = Path()
                 yAxis.move(to: origin)
-                yAxis.addLine(to: CGPoint(x: origin.x + yLength, y: origin.y - yLength))
+                yAxis.addLine(to: yAxisPoint)
                 context.stroke(yAxis, with: .color(.green.opacity(0.9)), lineWidth: 2)
 
-                context.draw(Text("Z").font(.caption.bold()).foregroundColor(.blue.opacity(0.95)), at: CGPoint(x: origin.x, y: origin.y - zLength - 10))
-                context.draw(Text("X").font(.caption.bold()).foregroundColor(.red.opacity(0.95)), at: CGPoint(x: origin.x + xLength + 10, y: origin.y))
-                context.draw(Text("Y").font(.caption.bold()).foregroundColor(.green.opacity(0.95)), at: CGPoint(x: origin.x + yLength + 8, y: origin.y - yLength - 6))
+                context.draw(Text("Z").font(.caption.bold()).foregroundColor(.blue.opacity(0.95)), at: labelPoint(for: zAxisPoint, from: origin))
+                context.draw(Text("X").font(.caption.bold()).foregroundColor(.red.opacity(0.95)), at: labelPoint(for: xAxisPoint, from: origin))
+                context.draw(Text("Y").font(.caption.bold()).foregroundColor(.green.opacity(0.95)), at: labelPoint(for: yAxisPoint, from: origin))
             }
             .padding(6)
         }
         .frame(width: 92, height: 92)
+    }
+
+    private func projectedAxisEndpoint(axis: (x: CGFloat, y: CGFloat, z: CGFloat), origin: CGPoint, length: CGFloat) -> CGPoint {
+        let pitch = CGFloat(camera.pitch * .pi / 180)
+        let yaw = CGFloat(camera.yaw * .pi / 180)
+
+        let pitchedY = axis.y * cos(pitch) - axis.z * sin(pitch)
+        let pitchedZ = axis.y * sin(pitch) + axis.z * cos(pitch)
+        let rotatedX = axis.x * cos(yaw) + pitchedZ * sin(yaw)
+        let rotatedY = pitchedY
+
+        return CGPoint(
+            x: origin.x + rotatedX * length,
+            y: origin.y - rotatedY * length
+        )
+    }
+
+    private func labelPoint(for endpoint: CGPoint, from origin: CGPoint) -> CGPoint {
+        let dx = endpoint.x - origin.x
+        let dy = endpoint.y - origin.y
+        let distance = max(sqrt(dx * dx + dy * dy), 0.001)
+
+        return CGPoint(
+            x: endpoint.x + dx / distance * 10,
+            y: endpoint.y + dy / distance * 10
+        )
     }
 }

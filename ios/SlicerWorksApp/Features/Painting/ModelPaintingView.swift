@@ -277,6 +277,7 @@ struct ModelPaintingView: View {
         ZStack {
             if let selectedModel = store.selectedModel {
                 ModelWorkspaceSceneView(
+                    camera: $workspaceCamera,
                     models: [selectedModel],
                     selectedModelID: selectedModel.id,
                     surfaceColor: store.activeProject.sliceSettings.surfaceColor,

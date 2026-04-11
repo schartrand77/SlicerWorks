@@ -25,6 +25,11 @@ struct SlicerDashboardView: View {
                     .padding(.top, 18)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
+                orientationCard
+                    .padding(.top, 18)
+                    .padding(.trailing, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
                 leftSideChrome
                     .padding(.leading, 10)
                     .padding(.top, 20)
@@ -440,6 +445,7 @@ struct SlicerDashboardView: View {
                                 .foregroundStyle(.white.opacity(0.75))
                         } else {
                             ModelWorkspaceSceneView(
+                                camera: $workspaceCamera,
                                 models: plate.models,
                                 selectedModelID: store.selectedModelID,
                                 surfaceColor: store.activeProject.sliceSettings.surfaceColor,
@@ -547,6 +553,10 @@ struct SlicerDashboardView: View {
 
     private var orientationCluster: some View {
         WorkspaceNavigationCluster(camera: $workspaceCamera)
+    }
+
+    private var orientationCard: some View {
+        WorkspaceXYZDiagram(camera: workspaceCamera)
     }
 
     private var floatingStatusCard: some View {
