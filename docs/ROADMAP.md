@@ -16,7 +16,7 @@ SlicerWorks is currently an early iPad-first SwiftUI scaffold with:
 - An always-on startup landing page that auto-scans LAN for newly detected Bambu printers, prompts for add with access code, and then hands off into the workspace.
 - A runnable Xcode project and test targets in `ios/SlicerWorks`.
 
-The main gap is no longer basic app bootstrapping. The app can build inside the nested Xcode project, but the production-grade slicing, 3D interaction, file handling, and printer connectivity layers are still missing, and the repository now needs consolidation around one authoritative app target and source tree.
+The main gap is no longer basic app bootstrapping. The app can build from the Xcode project at `ios/SlicerWorks/SlicerWorks.xcodeproj`, which points at `ios/SlicerWorksApp` and `ios/SlicerWorksAppTests` as the active app and test roots. The production-grade slicing, 3D interaction, file handling, and printer connectivity layers are still missing, and the repository still needs final cleanup of stale duplicate app/test folders inside the nested project area.
 
 ## Product Goal
 Ship an iPad-native slicer that is strong enough to replace desktop-first workflows for common Bambu printing tasks:
@@ -44,8 +44,11 @@ Target outcome: keep the runnable app foundation clean enough to support real fe
 - Complete: add dependency injection boundaries for slicer, file import, persistence, and printer networking services.
 - Complete: introduce error types and user-facing status models instead of raw strings in views.
 - Complete: establish XCTest-based test targets for core store and project domain behavior.
-- In progress: consolidate duplicate source trees so `ios/SlicerWorks` is the single runnable and editable app root.
-- In progress: wire test execution into a documented local command and CI-friendly path.
+- In progress: consolidate duplicate source trees so `ios/SlicerWorks/SlicerWorks.xcodeproj` is the single runnable project and `ios/SlicerWorksApp` / `ios/SlicerWorksAppTests` are the active source roots.
+- In progress: wire local test execution into a documented, repeatable command:
+  `xcodebuild test -project ios/SlicerWorks/SlicerWorks.xcodeproj -scheme SlicerWorks -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=26.2'`
+- Resolve simulator launch instability before marking the command verified; the latest run built the targets but failed while launching simulator test clones with `NSMachErrorDomain Code=-308`.
+- Add a CI-friendly variant of the test command once the stale nested source copy is removed.
 
 ### Definition of done
 - App builds and runs from Xcode from a single canonical project layout.
@@ -58,7 +61,7 @@ Target outcome: keep the runnable app foundation clean enough to support real fe
 - `ProjectRepository` coverage for in-memory and `UserDefaults` document persistence round trips.
 - `ProjectValidator` coverage for core model/settings validation rules.
 
-The remaining gap is execution discipline rather than test absence: the repo needs one canonical test target location, documented commands for local runs, and CI so coverage does not drift as real integrations replace mocks.
+The remaining gap is execution discipline rather than test absence: the repo now has a canonical local test command, but still needs stale nested test files removed and CI added so coverage does not drift as real integrations replace mocks.
 
 ## Phase 1: Project Import and Persistence
 Target outcome: users can open, save, and resume real print projects.
@@ -163,7 +166,7 @@ These tracks should move in parallel with the phase roadmap rather than waiting 
 
 ### Repo and build hygiene
 - Consolidate duplicate app and test trees so roadmap work lands in one place.
-- Document the canonical Xcode scheme, simulator target, and test command.
+- Complete: document the canonical Xcode scheme, simulator target, and test command.
 - Add CI to run unit tests on every branch once the canonical project layout is settled.
 
 ### Domain model maturity
@@ -186,12 +189,12 @@ These tracks should move in parallel with the phase roadmap rather than waiting 
 Recommended next sequence for actual development:
 
 1. Consolidate the repo so `ios/SlicerWorks` is the single canonical app and test target.
-2. Document and verify the local build/test path from that project.
-3. Implement file import for `.stl`, `.obj`, and `.3mf` into a stable internal project/mesh representation.
+2. Document the local build/test path from that project and verify it after simulator state is clean.
+3. Remove or archive the stale nested app/test copy after confirming no newer code exists there.
 4. Extend validation from core settings into imported geometry and printer bounds.
 5. Replace the placeholder viewport with a real render pipeline that can own picking and camera state.
 6. Introduce structured slice settings and printer preset mapping.
-7. Start LAN device discovery only after a real slice artifact exists.
+7. Connect LAN device discovery to real slice artifacts through authenticated upload.
 
 ## Milestone View
 Use these checkpoints to decide whether the roadmap is still moving toward a shippable app rather than accumulating disconnected scaffolding.
