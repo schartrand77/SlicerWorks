@@ -1,14 +1,29 @@
 import SceneKit
 import SwiftUI
 
+enum ModelWorkspaceContextAction {
+    case selectModel(PlacedModel.ID?)
+    case duplicateModel(PlacedModel.ID)
+    case deleteModel(PlacedModel.ID)
+    case centerModel(PlacedModel.ID)
+    case rotateModel(PlacedModel.ID, degrees: Double)
+    case scaleModel(PlacedModel.ID, percentageDelta: Int)
+    case resetModelTransform(PlacedModel.ID)
+}
+
 struct ModelWorkspaceSceneView: UIViewRepresentable {
     let models: [PlacedModel]
     let selectedModelID: PlacedModel.ID?
     let surfaceColor: PrintColorOption
     let onSelectModel: (PlacedModel.ID?) -> Void
+    var onContextAction: (ModelWorkspaceContextAction) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSelectModel: onSelectModel)
+        Coordinator(
+            selectedModelID: selectedModelID,
+            onSelectModel: onSelectModel,
+            onContextAction: onContextAction
+        )
     }
 
     func makeUIView(context: Context) -> SCNView {
@@ -20,13 +35,22 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
         let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         view.addGestureRecognizer(tapGesture)
+        view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
+        view.installPencilInteraction(delegate: context.coordinator)
+        if #available(iOS 16.0, *) {
+            let editMenuInteraction = UIEditMenuInteraction(delegate: context.coordinator)
+            view.addInteraction(editMenuInteraction)
+            context.coordinator.editMenuInteraction = editMenuInteraction
+        }
         context.coordinator.sceneView = view
 
         return view
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
+        context.coordinator.selectedModelID = selectedModelID
         context.coordinator.onSelectModel = onSelectModel
+        context.coordinator.onContextAction = onContextAction
         view.scene = makeScene(context: context)
         context.coordinator.sceneView = view
     }
@@ -271,20 +295,37 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var sceneView: SCNView?
+        @available(iOS 16.0, *)
+        weak var editMenuInteraction: UIEditMenuInteraction?
+        var selectedModelID: PlacedModel.ID?
         var modelIDsByNodeName: [String: PlacedModel.ID] = [:]
+        var editMenuModelID: PlacedModel.ID?
+        var editMenuLocation: CGPoint = .zero
         var onSelectModel: (PlacedModel.ID?) -> Void
+        var onContextAction: (ModelWorkspaceContextAction) -> Void
 
-        init(onSelectModel: @escaping (PlacedModel.ID?) -> Void) {
+        init(
+            selectedModelID: PlacedModel.ID?,
+            onSelectModel: @escaping (PlacedModel.ID?) -> Void,
+            onContextAction: @escaping (ModelWorkspaceContextAction) -> Void
+        ) {
+            self.selectedModelID = selectedModelID
             self.onSelectModel = onSelectModel
+            self.onContextAction = onContextAction
         }
 
         @objc
         func handleTap(_ recognizer: UITapGestureRecognizer) {
             guard let sceneView else { return }
 
-            let point = recognizer.location(in: sceneView)
+            onSelectModel(modelID(at: recognizer.location(in: sceneView)))
+        }
+
+        private func modelID(at point: CGPoint) -> PlacedModel.ID? {
+            guard let sceneView else { return nil }
+
             let hitResults = sceneView.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue])
-            let selectedID = hitResults.lazy.compactMap { result -> PlacedModel.ID? in
+            return hitResults.lazy.compactMap { result -> PlacedModel.ID? in
                 var node: SCNNode? = result.node
                 while let currentNode = node {
                     if let name = currentNode.name,
@@ -295,9 +336,129 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 }
                 return nil
             }.first
-
-            onSelectModel(selectedID)
         }
+
+        func menu(for modelID: PlacedModel.ID?) -> UIMenu {
+            guard let modelID else {
+                return UIMenu(children: [
+                    UIAction(title: "Clear Selection", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in
+                        self?.onSelectModel(nil)
+                        self?.onContextAction(.selectModel(nil))
+                    }
+                ])
+            }
+
+            let selectAction = UIAction(title: "Select", image: UIImage(systemName: "checkmark.circle")) { [weak self] _ in
+                self?.onSelectModel(modelID)
+                self?.onContextAction(.selectModel(modelID))
+            }
+
+            let duplicateAction = UIAction(title: "Duplicate", image: UIImage(systemName: "plus.square.on.square")) { [weak self] _ in
+                self?.onContextAction(.duplicateModel(modelID))
+            }
+
+            let centerAction = UIAction(title: "Center on Plate", image: UIImage(systemName: "scope")) { [weak self] _ in
+                self?.onContextAction(.centerModel(modelID))
+            }
+
+            let rotateMenu = UIMenu(title: "Rotate", image: UIImage(systemName: "rotate.3d"), children: [
+                UIAction(title: "Rotate Left 45 deg", image: UIImage(systemName: "rotate.left")) { [weak self] _ in
+                    self?.onContextAction(.rotateModel(modelID, degrees: -45))
+                },
+                UIAction(title: "Rotate Right 45 deg", image: UIImage(systemName: "rotate.right")) { [weak self] _ in
+                    self?.onContextAction(.rotateModel(modelID, degrees: 45))
+                }
+            ])
+
+            let scaleMenu = UIMenu(title: "Scale", image: UIImage(systemName: "arrow.up.left.and.arrow.down.right"), children: [
+                UIAction(title: "Scale Up 10%", image: UIImage(systemName: "plus.magnifyingglass")) { [weak self] _ in
+                    self?.onContextAction(.scaleModel(modelID, percentageDelta: 10))
+                },
+                UIAction(title: "Scale Down 10%", image: UIImage(systemName: "minus.magnifyingglass")) { [weak self] _ in
+                    self?.onContextAction(.scaleModel(modelID, percentageDelta: -10))
+                }
+            ])
+
+            let resetAction = UIAction(title: "Reset Transform", image: UIImage(systemName: "arrow.counterclockwise")) { [weak self] _ in
+                self?.onContextAction(.resetModelTransform(modelID))
+            }
+
+            let deleteAction = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+                self?.onContextAction(.deleteModel(modelID))
+            }
+
+            return UIMenu(children: [
+                selectAction,
+                duplicateAction,
+                centerAction,
+                rotateMenu,
+                scaleMenu,
+                resetAction,
+                deleteAction
+            ])
+        }
+
+        @available(iOS 16.0, *)
+        func presentEditMenu(at location: CGPoint) {
+            let menuModelID = modelID(at: location) ?? selectedModelID
+            editMenuModelID = menuModelID
+            editMenuLocation = location
+            editMenuInteraction?.presentEditMenu(
+                with: UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
+            )
+        }
+    }
+}
+
+extension ModelWorkspaceSceneView.Coordinator: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        let modelID = modelID(at: location)
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            self?.menu(for: modelID) ?? UIMenu()
+        }
+    }
+}
+
+extension ModelWorkspaceSceneView.Coordinator: UIPencilInteractionDelegate {
+    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        guard #available(iOS 16.0, *),
+              let sceneView else {
+            return
+        }
+
+        presentEditMenu(at: CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY))
+    }
+
+    @available(iOS 17.5, *)
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+        guard let sceneView else {
+            return
+        }
+
+        let location = squeeze.hoverPose?.location ?? CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+        presentEditMenu(at: location)
+    }
+}
+
+@available(iOS 16.0, *)
+extension ModelWorkspaceSceneView.Coordinator: UIEditMenuInteractionDelegate {
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        menuFor configuration: UIEditMenuConfiguration,
+        suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        menu(for: editMenuModelID)
+    }
+
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        targetRectFor configuration: UIEditMenuConfiguration
+    ) -> CGRect {
+        CGRect(origin: editMenuLocation, size: CGSize(width: 1, height: 1))
     }
 }
 
@@ -404,5 +565,17 @@ private extension UIColor {
         let blue = CGFloat(value & 0xFF) / 255
 
         self.init(red: red, green: green, blue: blue, alpha: 1)
+    }
+}
+
+private extension UIView {
+    func installPencilInteraction(delegate: UIPencilInteractionDelegate) {
+        if #available(iOS 17.5, *) {
+            addInteraction(UIPencilInteraction(delegate: delegate))
+        } else {
+            let interaction = UIPencilInteraction()
+            interaction.delegate = delegate
+            addInteraction(interaction)
+        }
     }
 }

@@ -279,13 +279,34 @@ struct ModelPaintingView: View {
                 ModelWorkspaceSceneView(
                     models: [selectedModel],
                     selectedModelID: selectedModel.id,
-                    surfaceColor: store.activeProject.sliceSettings.surfaceColor
-                ) { modelID in
-                    store.selectModel(modelID)
-                }
+                    surfaceColor: store.activeProject.sliceSettings.surfaceColor,
+                    onSelectModel: { modelID in
+                        store.selectModel(modelID)
+                    },
+                    onContextAction: handleModelContextAction
+                )
             } else {
                 mockModelStage
             }
+        }
+    }
+
+    private func handleModelContextAction(_ action: ModelWorkspaceContextAction) {
+        switch action {
+        case let .selectModel(modelID):
+            store.selectModel(modelID)
+        case let .duplicateModel(modelID):
+            store.duplicateModel(modelID)
+        case let .deleteModel(modelID):
+            store.deleteModel(modelID)
+        case let .centerModel(modelID):
+            store.centerModel(modelID)
+        case let .rotateModel(modelID, degrees):
+            store.rotateModel(modelID, by: degrees)
+        case let .scaleModel(modelID, percentageDelta):
+            store.scaleModel(modelID, by: percentageDelta)
+        case let .resetModelTransform(modelID):
+            store.resetModelTransform(modelID)
         }
     }
 

@@ -293,6 +293,66 @@ final class AppStore: ObservableObject {
         moveSelectedModel(by: CGSize(width: x, height: y))
     }
 
+    func duplicateModel(_ modelID: PlacedModel.ID) {
+        guard let location = modelLocation(for: modelID) else { return }
+
+        let originalModel = activeProject.plates[location.plateIndex].models[location.modelIndex]
+        let copiedModel = PlacedModel(
+            id: UUID(),
+            name: copyName(for: originalModel.name, in: activeProject.plates[location.plateIndex].models),
+            sourceURL: originalModel.sourceURL,
+            position: PlatePosition(
+                x: clampWorkspaceCoordinate(originalModel.position.x + 24, limit: 240),
+                y: clampWorkspaceCoordinate(originalModel.position.y + 18, limit: 180)
+            ),
+            rotationDegrees: originalModel.rotationDegrees,
+            scalePercent: originalModel.scalePercent,
+            surfacePaintRegions: originalModel.surfacePaintRegions
+        )
+
+        activeProject.plates[location.plateIndex].models.insert(copiedModel, at: location.modelIndex + 1)
+        selectedPlateID = activeProject.plates[location.plateIndex].id
+        selectedModelID = copiedModel.id
+        pencilState.lastEventSummary = "Duplicated \(originalModel.name)"
+    }
+
+    func deleteModel(_ modelID: PlacedModel.ID) {
+        guard let location = modelLocation(for: modelID) else { return }
+
+        let deletedModel = activeProject.plates[location.plateIndex].models.remove(at: location.modelIndex)
+        if selectedModelID == modelID {
+            selectedModelID = activeProject.plates[location.plateIndex].models[safe: location.modelIndex]?.id
+                ?? activeProject.plates[location.plateIndex].models.last?.id
+        }
+        pencilState.lastEventSummary = "Deleted \(deletedModel.name)"
+    }
+
+    func centerModel(_ modelID: PlacedModel.ID) {
+        updateModel(modelID) { model in
+            model.position = PlatePosition(x: 0, y: 0)
+        }
+    }
+
+    func rotateModel(_ modelID: PlacedModel.ID, by degrees: Double) {
+        updateModel(modelID) { model in
+            model.rotationDegrees += degrees
+        }
+    }
+
+    func resetModelTransform(_ modelID: PlacedModel.ID) {
+        updateModel(modelID) { model in
+            model.position = PlatePosition(x: 0, y: 0)
+            model.rotationDegrees = 0
+            model.scalePercent = 100
+        }
+    }
+
+    func scaleModel(_ modelID: PlacedModel.ID, by percentageDelta: Int) {
+        updateModel(modelID) { model in
+            model.scalePercent = min(max(model.scalePercent + percentageDelta, 25), 400)
+        }
+    }
+
     func rotateSelectedModel(by degrees: Double) {
         guard let selectedPlateIndex,
               let selectedModelID,
@@ -488,6 +548,42 @@ final class AppStore: ObservableObject {
         return true
     }
 
+    @discardableResult
+    private func updateModel(_ modelID: PlacedModel.ID, _ update: (inout PlacedModel) -> Void) -> Bool {
+        guard let location = modelLocation(for: modelID) else {
+            return false
+        }
+
+        update(&activeProject.plates[location.plateIndex].models[location.modelIndex])
+        selectedPlateID = activeProject.plates[location.plateIndex].id
+        selectedModelID = modelID
+        return true
+    }
+
+    private func modelLocation(for modelID: PlacedModel.ID) -> (plateIndex: Int, modelIndex: Int)? {
+        for plateIndex in activeProject.plates.indices {
+            if let modelIndex = activeProject.plates[plateIndex].models.firstIndex(where: { $0.id == modelID }) {
+                return (plateIndex, modelIndex)
+            }
+        }
+
+        return nil
+    }
+
+    private func copyName(for name: String, in models: [PlacedModel]) -> String {
+        let baseName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Model" : name
+        var candidate = "\(baseName) Copy"
+        var copyIndex = 2
+        let existingNames = Set(models.map(\.name))
+
+        while existingNames.contains(candidate) {
+            candidate = "\(baseName) Copy \(copyIndex)"
+            copyIndex += 1
+        }
+
+        return candidate
+    }
+
     private func appendSurfacePaintRegion(_ region: SurfacePaintRegion) {
         _ = updateSelectedModel { model in
             model.surfacePaintRegions.append(region)
@@ -577,4 +673,10 @@ struct PaintingStroke: Identifiable, Equatable {
     var points: [CGPoint]
     var forceSamples: [CGFloat]
     var rollAngle: CGFloat
+}
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
 }
