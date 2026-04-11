@@ -160,15 +160,16 @@ final class AppStore: ObservableObject {
                 return
             }
 
+            let restoredProject = demoProjectIfModelsAreUnavailable(document.project)
             isRestoringProject = true
-            activeProject = document.project
+            activeProject = restoredProject
             selectedPrinter = document.lastUsedPrinter
-            selectedPlateID = document.project.plates.first?.id
-            selectedModelID = document.project.plates.first?.models.first?.id
+            selectedPlateID = restoredProject.plates.first?.id
+            selectedModelID = restoredProject.plates.first?.models.first?.id
             isRestoringProject = false
             hasCompletedInitialLoad = true
             refreshProjectValidation()
-            projectStatus = .success(message: "Loaded saved project")
+            projectStatus = .success(message: restoredProject == document.project ? "Loaded saved project" : "Loaded demo project")
         } catch {
             hasCompletedInitialLoad = true
             projectStatus = .failure(.projectLoadFailed(reason: error.localizedDescription))
@@ -227,14 +228,8 @@ final class AppStore: ObservableObject {
         guard let selectedPlateIndex else { return }
 
         let modelNumber = activeProject.plates[selectedPlateIndex].models.count + 1
-        let model = PlacedModel(
-            id: UUID(),
-            name: "Model \(modelNumber)",
-            sourceURL: URL(fileURLWithPath: "/tmp/model_\(modelNumber).stl"),
-            position: PlatePosition(x: Double((modelNumber - 1) * 28), y: Double((modelNumber - 1) * 18)),
-            rotationDegrees: 0,
-            scalePercent: 100,
-            surfacePaintRegions: []
+        let model = PlacedModel.axolotlDemo(
+            position: PlatePosition(x: Double((modelNumber - 1) * 28), y: Double((modelNumber - 1) * 18))
         )
         activeProject.plates[selectedPlateIndex].models.append(model)
         selectedModelID = model.id
@@ -582,6 +577,15 @@ final class AppStore: ObservableObject {
         }
 
         return candidate
+    }
+
+    private func demoProjectIfModelsAreUnavailable(_ project: SliceProject) -> SliceProject {
+        let models = project.allModels
+        guard models.isEmpty || models.allSatisfy({ FileManager.default.fileExists(atPath: $0.sourceURL.path) == false }) else {
+            return project
+        }
+
+        return .example
     }
 
     private func appendSurfacePaintRegion(_ region: SurfacePaintRegion) {

@@ -10,21 +10,13 @@ struct SliceProject: Identifiable, Equatable, Codable {
 
     static let example = SliceProject(
         id: UUID(),
-        name: "Bambu Benchy",
+        name: "Axolotl Demo",
         plates: [
             BuildPlate(
                 id: UUID(),
                 name: "Plate 1",
                 models: [
-                    PlacedModel(
-                        id: UUID(),
-                        name: "Benchy",
-                        sourceURL: URL(fileURLWithPath: "/tmp/benchy.3mf"),
-                        position: PlatePosition(x: 0, y: 0),
-                        rotationDegrees: 0,
-                        scalePercent: 100,
-                        surfacePaintRegions: []
-                    )
+                    .axolotlDemo()
                 ]
             )
         ],
@@ -51,6 +43,25 @@ struct PlacedModel: Identifiable, Equatable, Codable {
     var rotationDegrees: Double
     var scalePercent: Int
     var surfacePaintRegions: [SurfacePaintRegion]
+
+    static func axolotlDemo(position: PlatePosition = PlatePosition(x: 0, y: 0)) -> PlacedModel {
+        PlacedModel(
+            id: UUID(),
+            name: "Axolotl",
+            sourceURL: DemoModelAssets.axolotlSTLURL,
+            position: position,
+            rotationDegrees: 0,
+            scalePercent: 100,
+            surfacePaintRegions: []
+        )
+    }
+}
+
+enum DemoModelAssets {
+    static var axolotlSTLURL: URL {
+        Bundle.main.url(forResource: "AxolotlDemo", withExtension: "stl")
+            ?? URL(fileURLWithPath: "/Users/stephenchartrand/Documents/slicerworks/ios/SlicerWorksApp/Resources/AxolotlDemo.stl")
+    }
 }
 
 struct PlatePosition: Equatable, Codable {

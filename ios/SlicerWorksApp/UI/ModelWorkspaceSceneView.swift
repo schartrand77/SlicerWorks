@@ -34,8 +34,29 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         view.scene = makeScene(context: context)
 
         let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        if #available(iOS 13.4, *) {
+            tapGesture.buttonMaskRequired = .primary
+        }
         view.addGestureRecognizer(tapGesture)
-        view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
+        if #available(iOS 13.4, *) {
+            let secondaryClickGesture = UITapGestureRecognizer(
+                target: context.coordinator,
+                action: #selector(Coordinator.handleSecondaryClick(_:))
+            )
+            secondaryClickGesture.name = Coordinator.secondaryClickGestureName
+            secondaryClickGesture.buttonMaskRequired = .secondary
+            secondaryClickGesture.cancelsTouchesInView = false
+            secondaryClickGesture.delegate = context.coordinator
+            view.addGestureRecognizer(secondaryClickGesture)
+        }
+        let longPressGesture = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleLongPress(_:))
+        )
+        longPressGesture.minimumPressDuration = 0.42
+        longPressGesture.cancelsTouchesInView = false
+        longPressGesture.delegate = context.coordinator
+        view.addGestureRecognizer(longPressGesture)
         view.installPencilInteraction(delegate: context.coordinator)
         if #available(iOS 16.0, *) {
             let editMenuInteraction = UIEditMenuInteraction(delegate: context.coordinator)
@@ -294,6 +315,8 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject {
+        static let secondaryClickGestureName = "ModelWorkspaceSceneView.secondaryClick"
+
         weak var sceneView: SCNView?
         @available(iOS 16.0, *)
         weak var editMenuInteraction: UIEditMenuInteraction?
@@ -319,6 +342,30 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             guard let sceneView else { return }
 
             onSelectModel(modelID(at: recognizer.location(in: sceneView)))
+        }
+
+        @objc
+        func handleSecondaryClick(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended,
+                  let sceneView else {
+                return
+            }
+
+            if #available(iOS 16.0, *) {
+                presentEditMenu(at: recognizer.location(in: sceneView))
+            }
+        }
+
+        @objc
+        func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+            guard recognizer.state == .began,
+                  let sceneView else {
+                return
+            }
+
+            if #available(iOS 16.0, *) {
+                presentEditMenu(at: recognizer.location(in: sceneView))
+            }
         }
 
         private func modelID(at point: CGPoint) -> PlacedModel.ID? {
@@ -410,16 +457,9 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
     }
 }
 
-extension ModelWorkspaceSceneView.Coordinator: UIContextMenuInteractionDelegate {
-    func contextMenuInteraction(
-        _ interaction: UIContextMenuInteraction,
-        configurationForMenuAtLocation location: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        let modelID = modelID(at: location)
-
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            self?.menu(for: modelID) ?? UIMenu()
-        }
+extension ModelWorkspaceSceneView.Coordinator: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 
