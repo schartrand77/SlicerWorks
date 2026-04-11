@@ -76,14 +76,25 @@ struct PrinterControlView: View {
             Text(store.selectedLANPrinter?.name ?? store.selectedPrinter.displayName)
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white)
+            if store.latestSliceResult == nil {
+                Text("Slice required")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.yellow.opacity(0.95))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+            }
             Button("Discover") {
                 Task { await store.discoverPrintersOnLAN() }
             }
             .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
             Button("Status") {}
             .buttonStyle(DeviceCapsuleStyle(fill: Color.white.opacity(0.08)))
-            Button("Queue") {}
+            Button("Upload") {
+                Task { await store.pushLatestSliceToPrinter() }
+            }
                 .buttonStyle(DeviceCapsuleStyle(fill: Color.blue.opacity(0.88)))
+                .disabled(store.latestSliceResult == nil || store.uploadStatus.isWorking)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -135,10 +146,11 @@ struct PrinterControlView: View {
             }
             .frame(width: 260, alignment: .leading)
 
-            floatingInfoCard(title: "Controls") {
+            floatingInfoCard(title: "AMS Color Match") {
+                deviceRow("Surface", store.activeProject.sliceSettings.surfaceColor.displayName)
+                deviceRow("Infill", store.activeProject.sliceSettings.infillColor.displayName)
                 deviceRow("LAN discovery", store.discoveryStatus.message)
-                deviceRow("Cloud queue", "Future")
-                deviceRow("AMS sync", "Ready")
+                deviceRow("AMS sync", store.latestSliceResult == nil ? "Waiting for slice" : "Ready")
                 if let selectedLANPrinter = store.selectedLANPrinter {
                     deviceRow("Access code", selectedLANPrinter.hasAccessCode ? "Saved" : "Required")
                 }
@@ -155,6 +167,11 @@ struct PrinterControlView: View {
                 deviceRow("Profile", store.selectedPrinter.displayName)
                 deviceRow("Host", store.selectedLANPrinter?.host ?? "Scan LAN")
                 deviceRow("Access code", store.selectedLANPrinter?.hasAccessCode == true ? "Saved" : "Required")
+                if let latestSliceResult = store.latestSliceResult {
+                    deviceRow("G-code", "\(latestSliceResult.estimatedPrintTimeMinutes) min")
+                } else {
+                    deviceRow("G-code", "Slice in Prepare")
+                }
             }
             .frame(width: 240, alignment: .leading)
             Spacer()

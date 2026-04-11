@@ -9,6 +9,7 @@ struct SlicerDashboardView: View {
     @State private var showInspectorPanel = true
     @State private var showColorPanel = true
     @State private var workspaceCamera = WorkspaceCamera()
+    @State private var prepareMode: PrepareEditingMode = .layout
     @State private var isPresentingModelImporter = false
     @State private var printerPendingAccessCodeEntry: BambuLANPrinter?
     @State private var printerPendingAccessCodeEdit: BambuLANPrinter?
@@ -119,27 +120,56 @@ struct SlicerDashboardView: View {
                     .foregroundStyle(.white.opacity(0.7))
             }
 
+            prepareModePicker
+
             Button("Slice") {
-                Task { await store.prepareSlice() }
+                Task {
+                    let didSlice = await store.prepareSlice()
+                    if didSlice {
+                        selectedSection = .print
+                    }
+                }
             }
-            .buttonStyle(TopBarCapsuleStyle(fill: Color.white.opacity(0.08)))
+            .buttonStyle(TopBarCapsuleStyle(fill: Color.blue.opacity(0.88)))
+            .disabled(store.sliceStatus.isWorking)
 
             Button("Import") {
                 isPresentingModelImporter = true
             }
             .buttonStyle(TopBarCapsuleStyle(fill: Color.white.opacity(0.08)))
 
-            Button("Print") {
-                Task { await store.pushLatestSliceToPrinter() }
-            }
-            .buttonStyle(TopBarCapsuleStyle(fill: Color.blue.opacity(0.88)))
-            .disabled(store.latestSliceResult == nil || store.sliceStatus.isWorking || store.uploadStatus.isWorking)
-
             compactIconButton("ellipsis")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private var prepareModePicker: some View {
+        HStack(spacing: 4) {
+            ForEach(PrepareEditingMode.allCases) { mode in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        prepareMode = mode
+                    }
+                } label: {
+                    Label(mode.title, systemImage: mode.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(prepareMode == mode ? 1 : 0.72))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            prepareMode == mode ? Color.green.opacity(0.78) : Color.white.opacity(0.05),
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(Color.black.opacity(0.20), in: Capsule())
         .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
     }
 
@@ -166,7 +196,7 @@ struct SlicerDashboardView: View {
 
             toolLabelStack(labels: [
                 ("Search", "magnifyingglass"),
-                ("Sketch", "scribble.variable"),
+                ("Paint", "paintbrush.pointed"),
                 ("Add", "plus"),
                 ("Transform", "arrow.up.left.and.arrow.down.right"),
                 ("Tools", "wrench.and.screwdriver")
@@ -178,6 +208,10 @@ struct SlicerDashboardView: View {
                 if label == "Add" {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showAddPanel.toggle()
+                    }
+                } else if label == "Paint" {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        prepareMode = .paint
                     }
                 }
             }
@@ -213,6 +247,10 @@ struct SlicerDashboardView: View {
                         showInspectorPanel.toggle()
                     }
                 }
+            }
+
+            if prepareMode == .paint {
+                paintToolsPanel
             }
 
             if showInspectorPanel, let selectedModel = store.selectedModel {
@@ -434,6 +472,38 @@ struct SlicerDashboardView: View {
         .frame(width: 180)
     }
 
+    private var paintToolsPanel: some View {
+        floatingInfoCard(title: "Paint") {
+            ForEach(PaintingTool.allCases) { tool in
+                Button {
+                    store.selectedTool = tool
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: tool.systemImage)
+                            .foregroundStyle(tool.tint)
+                            .frame(width: 16)
+                        Text(tool.title)
+                            .foregroundStyle(.white)
+                        Spacer()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(8)
+                    .background(Color.white.opacity(store.selectedTool == tool ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button("Clear Selected Paint") {
+                store.clearSelectedModelPainting()
+            }
+            .buttonStyle(PlainCapsuleActionStyle())
+
+            Text(store.pencilState.lastEventSummary)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.58))
+        }
+    }
+
     private var plateWorkspace: some View {
         ZStack {
             WorkspaceGrid()
@@ -459,6 +529,42 @@ struct SlicerDashboardView: View {
                             )
                             .frame(width: geometry.size.width, height: geometry.size.height)
 
+                            if prepareMode == .paint {
+                                paintSurfaceOverlay
+
+                                ApplePencilCanvasView(
+                                    onHoverChanged: { location, azimuth, altitude, zOffset, roll in
+                                        store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                                    },
+                                    onStrokeBegan: { location, force, azimuth, roll in
+                                        store.beginPaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
+                                    },
+                                    onStrokeMoved: { location, force, azimuth, roll in
+                                        store.continuePaintingStroke(at: location, force: force, azimuth: azimuth, roll: roll)
+                                    },
+                                    onStrokeEnded: {
+                                        store.endPaintingStroke()
+                                    },
+                                    onTap: { location, azimuth, altitude, zOffset, roll in
+                                        store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                                        store.handlePencilDoubleTap()
+                                    },
+                                    onSqueeze: { location, azimuth, altitude, zOffset, roll in
+                                        store.handlePencilHover(location: location, azimuth: azimuth, altitude: altitude, zOffset: zOffset, roll: roll)
+                                        store.handlePencilSqueeze()
+                                    }
+                                )
+
+                                if store.selectedModelPaintingStrokes.isEmpty && store.activePaintingStroke == nil {
+                                    centerHint(
+                                        icon: "applepencil.tip",
+                                        title: "Paint the selected model",
+                                        subtitle: "Apple Pencil edits surface color while the model stays in Prepare."
+                                    )
+                                    .frame(maxWidth: geometry.size.width * 0.5)
+                                }
+                            }
+
                             if let selectedModel = store.selectedModel {
                                 Text(selectedModel.name)
                                     .font(.caption.weight(.medium))
@@ -480,6 +586,32 @@ struct SlicerDashboardView: View {
             }
         }
         .contentShape(Rectangle())
+    }
+
+    private var paintSurfaceOverlay: some View {
+        GeometryReader { _ in
+            ZStack {
+                Canvas { context, _ in
+                    for stroke in store.selectedModelPaintingStrokes {
+                        draw(stroke: stroke, in: &context)
+                    }
+                    if let activePaintingStroke = store.activePaintingStroke,
+                       activePaintingStroke.modelID == store.selectedModelID {
+                        draw(stroke: activePaintingStroke, in: &context)
+                    }
+                }
+
+                if let hoverLocation = store.pencilState.hoverLocation {
+                    PrepareHoverPreviewView(
+                        tool: store.selectedTool,
+                        hoverLocation: hoverLocation,
+                        rollAngle: store.pencilState.barrelRollAngle,
+                        isActive: store.pencilState.isHovering
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private func handleModelContextAction(_ action: ModelWorkspaceContextAction) {
@@ -622,6 +754,41 @@ struct SlicerDashboardView: View {
         .font(.caption2)
     }
 
+    private func draw(stroke: PaintingStroke, in context: inout GraphicsContext) {
+        guard let first = stroke.points.first else { return }
+
+        var path = Path()
+        path.move(to: first)
+        for point in stroke.points.dropFirst() {
+            path.addLine(to: point)
+        }
+
+        let width = max(4, 8 + (stroke.forceSamples.last ?? 0) * 2)
+        context.stroke(
+            path,
+            with: .color(stroke.color.swatch.opacity(0.92)),
+            style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
+        )
+    }
+
+    private func centerHint(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 34))
+                .foregroundStyle(.white.opacity(0.85))
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text(subtitle)
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.white.opacity(0.6))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 16))
+    }
+
     private func toolLabelStack(labels: [(String, String)], @ViewBuilder overlay: () -> some View, onTap: @escaping (String) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(labels, id: \.0) { label, icon in
@@ -695,6 +862,52 @@ private extension UTType {
     static let slicerWorks3mf = UTType(filenameExtension: "3mf") ?? .data
     static let slicerWorksSTL = UTType(filenameExtension: "stl") ?? .data
     static let slicerWorksOBJ = UTType(filenameExtension: "obj") ?? .data
+}
+
+private enum PrepareEditingMode: String, CaseIterable, Identifiable {
+    case layout
+    case paint
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .layout:
+            return "Layout"
+        case .paint:
+            return "Paint"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .layout:
+            return "move.3d"
+        case .paint:
+            return "paintbrush.pointed"
+        }
+    }
+}
+
+private struct PrepareHoverPreviewView: View {
+    let tool: PaintingTool
+    let hoverLocation: CGPoint
+    let rollAngle: CGFloat
+    let isActive: Bool
+
+    var body: some View {
+        Circle()
+            .strokeBorder(tool.tint.opacity(isActive ? 0.9 : 0.3), lineWidth: 2)
+            .background(Circle().fill(tool.tint.opacity(0.12)))
+            .frame(width: 46, height: 46)
+            .overlay {
+                Image(systemName: tool.systemImage)
+                    .foregroundStyle(tool.tint)
+                    .rotationEffect(.radians(Double(rollAngle)))
+            }
+            .position(hoverLocation)
+            .allowsHitTesting(false)
+    }
 }
 
 private struct WorkspaceGrid: View {

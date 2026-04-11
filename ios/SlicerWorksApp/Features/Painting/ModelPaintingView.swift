@@ -252,8 +252,8 @@ struct ModelPaintingView: View {
                     if store.selectedModel == nil {
                         centerHint(
                             icon: "cube.transparent",
-                            title: "Select a model in Slice first",
-                            subtitle: "Every loaded model stays in a 3D workspace, including Paint."
+                            title: "Select a model in Prepare first",
+                            subtitle: "Every loaded model stays in the same 3D workspace."
                         )
                     }
 

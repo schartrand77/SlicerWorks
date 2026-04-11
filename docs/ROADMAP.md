@@ -3,15 +3,15 @@
 ## Current State
 SlicerWorks is currently an early iPad-first SwiftUI scaffold with:
 
-- Root tab navigation for Slice, Paint, and Devices.
+- App-owned workspace navigation for Prepare and Print.
 - Centralized app state in `AppStore`.
 - Structured app environment and typed operation status handling.
 - Bambu printer profile models for A1, A1 Mini, P1P, P1S, and X1 Carbon.
 - Mock slicing and printer upload abstractions.
 - Serializable project document, local persistence scaffolding, and autosave hooks.
-- Model import for `.3mf`, `.stl`, and `.obj` through the Slice workspace, with imported files copied into app storage.
+- Model import for `.3mf`, `.stl`, and `.obj` through the Prepare workspace, with imported files copied into app storage.
 - Project validation for core settings and supported source formats.
-- Apple Pencil Pro-oriented painting tool model with a gesture-driven placeholder viewport.
+- Apple Pencil Pro-oriented painting inside Prepare as another model-editing mode, not a separate page.
 - LAN Bambu printer discovery, add/select flow, and local known-printer persistence scaffolding.
 - An always-on startup landing page that auto-scans LAN for newly detected Bambu printers, prompts for add with access code, and then hands off into the workspace.
 - A runnable Xcode project and test targets in `ios/SlicerWorks`.
@@ -25,6 +25,7 @@ Ship an iPad-native slicer that is strong enough to replace desktop-first workfl
 - Configure print settings with confidence.
 - Paint supports, seams, or materials with Apple Pencil Pro.
 - Slice reliably with printer-correct presets.
+- Move to Print only after slicing succeeds, then match generated colors to AMS slots.
 - Send the job directly to a Bambu printer on the local network.
 
 ## Roadmap Principles

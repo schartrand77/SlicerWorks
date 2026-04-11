@@ -3,18 +3,16 @@ import SwiftUI
 struct RootTabView: View {
     @EnvironmentObject private var store: AppStore
     @State private var hasEnteredWorkspace = false
-    @State private var selectedSection: WorkspaceSection = .slice
+    @State private var selectedSection: WorkspaceSection = .prepare
 
     var body: some View {
         Group {
             if hasEnteredWorkspace {
                 NavigationStack {
                     switch selectedSection {
-                    case .slice:
+                    case .prepare:
                         SlicerDashboardView(selectedSection: $selectedSection)
-                    case .paint:
-                        ModelPaintingView(selectedSection: $selectedSection)
-                    case .devices:
+                    case .print:
                         PrinterControlView(selectedSection: $selectedSection)
                     }
                 }
@@ -28,31 +26,26 @@ struct RootTabView: View {
 }
 
 enum WorkspaceSection: String, CaseIterable, Identifiable {
-    case slice
-    case paint
-    case devices
+    case prepare
+    case print
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .slice:
-            return "Slice"
-        case .paint:
-            return "Paint"
-        case .devices:
-            return "Devices"
+        case .prepare:
+            return "Prepare"
+        case .print:
+            return "Print"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .slice:
+        case .prepare:
             return "cube"
-        case .paint:
-            return "paintbrush.pointed"
-        case .devices:
-            return "wifi"
+        case .print:
+            return "printer.fill"
         }
     }
 }

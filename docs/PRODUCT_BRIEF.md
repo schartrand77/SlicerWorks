@@ -12,7 +12,8 @@ SlicerWorks is an iPad-first 3D printing slicer designed for **iPad Pro + Apple 
    - Paint Brush, Smart Fill, Seam Mask, Support Blocker tool slots.
    - Pencil state model prepared for squeeze and barrel roll.
 3. **iPad navigation model**
-   - Tab-based root experience: Slice, Paint, Devices.
+   - App-owned root experience: Prepare for model layout and paint editing, then Slice as the action that advances to Print when gcode generation succeeds.
+   - Print page focuses on printer selection, AMS color matching, and upload.
 
 ## Platform assumptions
 - iPadOS 18+ target for Pencil Pro hardware features.

@@ -52,7 +52,8 @@ final class AppStore: ObservableObject {
         refreshProjectValidation()
     }
 
-    func prepareSlice() async {
+    @discardableResult
+    func prepareSlice() async -> Bool {
         sliceStatus = .working(message: "Slicing \(activeProject.name)...")
 
         do {
@@ -60,9 +61,11 @@ final class AppStore: ObservableObject {
             latestSliceResult = result
             sliceStatus = .success(message: "Sliced successfully")
             uploadStatus = .idle(message: "Ready to upload")
+            return true
         } catch {
             latestSliceResult = nil
             sliceStatus = .failure(.sliceFailed(reason: error.localizedDescription))
+            return false
         }
     }
 
@@ -413,7 +416,7 @@ final class AppStore: ObservableObject {
 
     func beginPaintingStroke(at location: CGPoint, force: CGFloat, azimuth: CGFloat, roll: CGFloat) {
         guard let selectedModelID else {
-            pencilState.lastEventSummary = "Select a model in the Slice workspace before painting."
+            pencilState.lastEventSummary = "Select a model in Prepare before painting."
             activePaintingStroke = nil
             return
         }
