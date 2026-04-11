@@ -41,16 +41,16 @@ struct PrinterControlView: View {
         .navigationBarHidden(true)
         .background(Color.black)
         .sheet(item: $printerPendingAccessCodeEntry) { printer in
-            BambuPrinterAccessCodeSheet(printer: printer) { accessCode in
-                store.addKnownLANPrinter(printer, accessCode: accessCode)
+            BambuPrinterAccessCodeSheet(printer: printer) { updatedPrinter, accessCode in
+                store.addKnownLANPrinter(updatedPrinter, accessCode: accessCode)
             }
         }
         .sheet(item: $printerPendingAccessCodeEdit) { printer in
             BambuPrinterAccessCodeSheet(
                 printer: printer,
                 initialAccessCode: printer.accessCode ?? ""
-            ) { accessCode in
-                store.updateLANPrinterAccessCode(printer.id, accessCode: accessCode)
+            ) { updatedPrinter, accessCode in
+                store.addKnownLANPrinter(updatedPrinter, accessCode: accessCode)
             }
         }
     }

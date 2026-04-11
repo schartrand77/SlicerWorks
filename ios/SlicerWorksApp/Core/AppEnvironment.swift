@@ -26,7 +26,7 @@ struct AppEnvironment {
 
     static let live = AppEnvironment(
         slicerEngine: MockSlicerEngine(),
-        deviceGateway: MockBambuDeviceGateway(),
+        deviceGateway: BonjourBambuDeviceGateway(),
         knownPrinterStore: UserDefaultsKnownPrinterStore(),
         projectRepository: UserDefaultsProjectRepository(),
         projectValidator: DefaultProjectValidator(),

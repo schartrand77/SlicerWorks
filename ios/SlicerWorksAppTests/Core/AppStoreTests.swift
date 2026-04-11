@@ -385,6 +385,29 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(try printerStore.loadPrinters(), [.studioP1S])
     }
 
+    func testAddKnownLANPrinterPersistsEditedPrinterNameAndSerial() throws {
+        let printerStore = InMemoryKnownPrinterStore()
+        let store = AppStore(
+            environment: AppEnvironment(
+                slicerEngine: TestSlicerEngine(result: .example),
+                deviceGateway: RecordingDeviceGateway(),
+                knownPrinterStore: printerStore,
+                projectRepository: InMemoryProjectRepository(),
+                projectValidator: DefaultProjectValidator()
+            )
+        )
+        var printer = BambuLANPrinter.studioP1SWithoutCode
+        printer.name = "Workshop Printer"
+        printer.serialNumber = "EDITED-SERIAL-66"
+
+        store.addKnownLANPrinter(printer, accessCode: "12345678")
+
+        XCTAssertEqual(store.knownLANPrinters.first?.name, "Workshop Printer")
+        XCTAssertEqual(store.knownLANPrinters.first?.serialNumber, "EDITED-SERIAL-66")
+        XCTAssertEqual(store.knownLANPrinters.first?.accessCode, "12345678")
+        XCTAssertEqual(try printerStore.loadPrinters().first?.name, "Workshop Printer")
+    }
+
     func testUpdateLANPrinterAccessCodePersistsCode() throws {
         let printerStore = InMemoryKnownPrinterStore(printers: [.studioP1SWithoutCode])
         let store = AppStore(

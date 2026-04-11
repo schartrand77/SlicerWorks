@@ -205,7 +205,7 @@ struct ModelPaintingView: View {
         } content: {
             GeometryReader { geometry in
                 ZStack {
-                    mockModelStage
+                    modelStage
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     paintSurfaceOverlay
@@ -269,6 +269,22 @@ struct ModelPaintingView: View {
         .onTapGesture {
             if store.selectedModel == nil {
                 store.selectModel(store.selectedPlate?.models.first?.id)
+            }
+        }
+    }
+
+    private var modelStage: some View {
+        ZStack {
+            if let selectedModel = store.selectedModel {
+                ModelWorkspaceSceneView(
+                    models: [selectedModel],
+                    selectedModelID: selectedModel.id,
+                    surfaceColor: store.activeProject.sliceSettings.surfaceColor
+                ) { modelID in
+                    store.selectModel(modelID)
+                }
+            } else {
+                mockModelStage
             }
         }
     }

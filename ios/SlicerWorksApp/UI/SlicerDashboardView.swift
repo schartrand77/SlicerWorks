@@ -58,16 +58,16 @@ struct SlicerDashboardView: View {
             }
         }
         .sheet(item: $printerPendingAccessCodeEntry) { printer in
-            BambuPrinterAccessCodeSheet(printer: printer) { accessCode in
-                store.addKnownLANPrinter(printer, accessCode: accessCode)
+            BambuPrinterAccessCodeSheet(printer: printer) { updatedPrinter, accessCode in
+                store.addKnownLANPrinter(updatedPrinter, accessCode: accessCode)
             }
         }
         .sheet(item: $printerPendingAccessCodeEdit) { printer in
             BambuPrinterAccessCodeSheet(
                 printer: printer,
                 initialAccessCode: printer.accessCode ?? ""
-            ) { accessCode in
-                store.updateLANPrinterAccessCode(printer.id, accessCode: accessCode)
+            ) { updatedPrinter, accessCode in
+                store.addKnownLANPrinter(updatedPrinter, accessCode: accessCode)
             }
         }
     }
@@ -427,26 +427,37 @@ struct SlicerDashboardView: View {
     }
 
     private var plateWorkspace: some View {
-        WorkspaceViewport(camera: $workspaceCamera) {
+        ZStack {
             WorkspaceGrid()
                 .clipShape(RoundedRectangle(cornerRadius: 28))
-        } content: {
+
             GeometryReader { geometry in
                 ZStack {
                     if let plate = store.selectedPlate {
-                        if let selectedModel = store.selectedModel {
-                            Text(selectedModel.name)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.8))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(Color.black.opacity(0.22), in: Capsule())
-                                .padding(.top, 72)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        }
+                        if plate.models.isEmpty {
+                            Text("Import a model to begin")
+                                .font(.headline)
+                                .foregroundStyle(.white.opacity(0.75))
+                        } else {
+                            ModelWorkspaceSceneView(
+                                models: plate.models,
+                                selectedModelID: store.selectedModelID,
+                                surfaceColor: store.activeProject.sliceSettings.surfaceColor
+                            ) { modelID in
+                                store.selectModel(modelID)
+                            }
+                            .frame(width: geometry.size.width, height: geometry.size.height)
 
-                        ForEach(Array(plate.models.enumerated()), id: \.element.id) { index, model in
-                            plateModelCard(model: model, index: index, size: geometry.size)
+                            if let selectedModel = store.selectedModel {
+                                Text(selectedModel.name)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.black.opacity(0.22), in: Capsule())
+                                    .padding(.top, 72)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            }
                         }
                     } else {
                         Text("Add a build plate to begin")
@@ -454,12 +465,10 @@ struct SlicerDashboardView: View {
                             .foregroundStyle(.white.opacity(0.75))
                     }
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            store.selectModel(nil)
-        }
     }
 
     private func plateModelCard(model: PlacedModel, index: Int, size: CGSize) -> some View {

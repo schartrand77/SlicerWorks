@@ -3,20 +3,24 @@ import SwiftUI
 struct BambuPrinterAccessCodeSheet: View {
     let printer: BambuLANPrinter
     let initialAccessCode: String
-    let onSave: (String) -> Void
+    let onSave: (BambuLANPrinter, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var printerName: String
+    @State private var serialNumber: String
     @State private var accessCode: String
     @FocusState private var isAccessCodeFocused: Bool
 
     init(
         printer: BambuLANPrinter,
         initialAccessCode: String = "",
-        onSave: @escaping (String) -> Void
+        onSave: @escaping (BambuLANPrinter, String) -> Void
     ) {
         self.printer = printer
         self.initialAccessCode = initialAccessCode
         self.onSave = onSave
+        _printerName = State(initialValue: printer.name)
+        _serialNumber = State(initialValue: printer.serialNumber)
         _accessCode = State(initialValue: initialAccessCode)
     }
 
@@ -24,8 +28,15 @@ struct BambuPrinterAccessCodeSheet: View {
         NavigationStack {
             Form {
                 Section("Printer") {
-                    detailRow("Name", printer.name)
-                    detailRow("Profile", printer.profile.displayName)
+                    TextField("Printer name", text: $printerName)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("printer-name-field")
+                    TextField("Serial number", text: $serialNumber)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("printer-serial-number-field")
+                    detailRow("Model", printer.profile.displayName)
                     detailRow("Host", printer.host)
                 }
 
@@ -38,12 +49,12 @@ struct BambuPrinterAccessCodeSheet: View {
                         .focused($isAccessCodeFocused)
                         .submitLabel(.done)
                         .onSubmit(saveAccessCode)
-                    Text("Bambu printers in LAN mode require the printer access code before they can be added and used.")
+                    Text("Bambu LAN connections use the printer host, serial number, and LAN access code.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Add Printer")
+            .navigationTitle(initialAccessCode.isEmpty ? "Add Printer" : "Edit Printer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -54,7 +65,7 @@ struct BambuPrinterAccessCodeSheet: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: saveAccessCode)
-                        .disabled(trimmedAccessCode.isEmpty)
+                        .disabled(trimmedPrinterName.isEmpty || trimmedAccessCode.isEmpty)
                 }
             }
         }
@@ -76,12 +87,25 @@ struct BambuPrinterAccessCodeSheet: View {
         accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var trimmedPrinterName: String {
+        printerName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedSerialNumber: String {
+        serialNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func saveAccessCode() {
-        guard trimmedAccessCode.isEmpty == false else {
+        guard trimmedPrinterName.isEmpty == false,
+              trimmedAccessCode.isEmpty == false else {
             return
         }
 
-        onSave(trimmedAccessCode)
+        var updatedPrinter = printer
+        updatedPrinter.name = trimmedPrinterName
+        updatedPrinter.serialNumber = trimmedSerialNumber.isEmpty ? printer.serialNumber : trimmedSerialNumber
+
+        onSave(updatedPrinter, trimmedAccessCode)
         dismiss()
     }
 }
