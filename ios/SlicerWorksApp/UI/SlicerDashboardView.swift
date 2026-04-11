@@ -483,10 +483,14 @@ struct SlicerDashboardView: View {
             store.deleteModel(modelID)
         case let .centerModel(modelID):
             store.centerModel(modelID)
+        case let .moveModel(modelID, xDelta, yDelta):
+            store.moveModel(modelID, xDelta: xDelta, yDelta: yDelta)
         case let .rotateModel(modelID, degrees):
             store.rotateModel(modelID, by: degrees)
         case let .scaleModel(modelID, percentageDelta):
             store.scaleModel(modelID, by: percentageDelta)
+        case let .autoOrientModel(modelID):
+            store.autoOrientModel(modelID)
         case let .resetModelTransform(modelID):
             store.resetModelTransform(modelID)
         }

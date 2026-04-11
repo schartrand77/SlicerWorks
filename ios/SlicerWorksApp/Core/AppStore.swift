@@ -38,6 +38,7 @@ final class AppStore: ObservableObject {
     private let projectImporter: ProjectImporting
     private var isRestoringProject = false
     private var hasCompletedInitialLoad = false
+    private var pendingAutosaveTask: Task<Void, Never>?
 
     init(environment: AppEnvironment? = nil) {
         let resolvedEnvironment = environment ?? .live
@@ -328,10 +329,27 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func moveModel(_ modelID: PlacedModel.ID, xDelta: Double, yDelta: Double) {
+        updateModel(modelID) { model in
+            model.position = PlatePosition(
+                x: clampWorkspaceCoordinate(model.position.x + xDelta, limit: 240),
+                y: clampWorkspaceCoordinate(model.position.y + yDelta, limit: 180)
+            )
+        }
+    }
+
     func rotateModel(_ modelID: PlacedModel.ID, by degrees: Double) {
         updateModel(modelID) { model in
-            model.rotationDegrees += degrees
+            model.rotationDegrees = normalizedRotation(model.rotationDegrees + degrees)
         }
+    }
+
+    func autoOrientModel(_ modelID: PlacedModel.ID) {
+        updateModel(modelID) { model in
+            model.position = PlatePosition(x: 0, y: 0)
+            model.rotationDegrees = 0
+        }
+        pencilState.lastEventSummary = "Auto-oriented model on the build plate"
     }
 
     func resetModelTransform(_ modelID: PlacedModel.ID) {
@@ -349,13 +367,9 @@ final class AppStore: ObservableObject {
     }
 
     func rotateSelectedModel(by degrees: Double) {
-        guard let selectedPlateIndex,
-              let selectedModelID,
-              let selectedModelIndex = activeProject.plates[selectedPlateIndex].models.firstIndex(where: { $0.id == selectedModelID }) else {
-            return
-        }
+        guard let selectedModelID else { return }
 
-        activeProject.plates[selectedPlateIndex].models[selectedModelIndex].rotationDegrees += degrees
+        rotateModel(selectedModelID, by: degrees)
     }
 
     func scaleSelectedModel(by percentageDelta: Int) {
@@ -531,6 +545,11 @@ final class AppStore: ObservableObject {
         min(max(value, -limit), limit)
     }
 
+    private func normalizedRotation(_ degrees: Double) -> Double {
+        let normalized = degrees.truncatingRemainder(dividingBy: 360)
+        return normalized < 0 ? normalized + 360 : normalized
+    }
+
     @discardableResult
     private func updateSelectedModel(_ update: (inout PlacedModel) -> Void) -> Bool {
         guard let selectedPlateIndex,
@@ -602,7 +621,17 @@ final class AppStore: ObservableObject {
             return
         }
 
-        saveActiveProject()
+        scheduleActiveProjectAutosave()
+    }
+
+    private func scheduleActiveProjectAutosave() {
+        pendingAutosaveTask?.cancel()
+        pendingAutosaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard Task.isCancelled == false else { return }
+
+            self?.saveActiveProject()
+        }
     }
 
     private func refreshProjectValidation() {

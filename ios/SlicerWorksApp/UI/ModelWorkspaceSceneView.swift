@@ -6,8 +6,10 @@ enum ModelWorkspaceContextAction {
     case duplicateModel(PlacedModel.ID)
     case deleteModel(PlacedModel.ID)
     case centerModel(PlacedModel.ID)
+    case moveModel(PlacedModel.ID, xDelta: Double, yDelta: Double)
     case rotateModel(PlacedModel.ID, degrees: Double)
     case scaleModel(PlacedModel.ID, percentageDelta: Int)
+    case autoOrientModel(PlacedModel.ID)
     case resetModelTransform(PlacedModel.ID)
 }
 
@@ -38,6 +40,32 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             tapGesture.buttonMaskRequired = .primary
         }
         view.addGestureRecognizer(tapGesture)
+
+        let zoomGesture = UIPinchGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleCameraZoom(_:))
+        )
+        zoomGesture.cancelsTouchesInView = false
+        zoomGesture.delegate = context.coordinator
+        view.addGestureRecognizer(zoomGesture)
+
+        let panGesture = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleModelPan(_:))
+        )
+        panGesture.maximumNumberOfTouches = 1
+        panGesture.cancelsTouchesInView = false
+        panGesture.delegate = context.coordinator
+        view.addGestureRecognizer(panGesture)
+
+        let rotationGesture = UIRotationGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleModelRotation(_:))
+        )
+        rotationGesture.cancelsTouchesInView = false
+        rotationGesture.delegate = context.coordinator
+        view.addGestureRecognizer(rotationGesture)
+
         if #available(iOS 13.4, *) {
             let secondaryClickGesture = UITapGestureRecognizer(
                 target: context.coordinator,
@@ -64,6 +92,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             context.coordinator.editMenuInteraction = editMenuInteraction
         }
         context.coordinator.sceneView = view
+        syncModelNodes(context: context)
 
         return view
     }
@@ -72,8 +101,9 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         context.coordinator.selectedModelID = selectedModelID
         context.coordinator.onSelectModel = onSelectModel
         context.coordinator.onContextAction = onContextAction
-        view.scene = makeScene(context: context)
         context.coordinator.sceneView = view
+        syncModelNodes(context: context)
+        context.coordinator.updateSelection(selectedModelID: selectedModelID)
     }
 
     private func makeScene(context: Context) -> SCNScene {
@@ -87,6 +117,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         cameraNode.position = SCNVector3(0, 180, 300)
         cameraNode.eulerAngles = SCNVector3(-Float.pi / 5.2, 0, 0)
         scene.rootNode.addChildNode(cameraNode)
+        context.coordinator.cameraNode = cameraNode
 
         let keyLight = SCNNode()
         keyLight.light = SCNLight()
@@ -104,18 +135,48 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
         scene.rootNode.addChildNode(makeBuildPlateNode())
 
+        let modelRootNode = SCNNode()
+        modelRootNode.name = "ModelWorkspaceSceneView.models"
+        scene.rootNode.addChildNode(modelRootNode)
+        context.coordinator.modelRootNode = modelRootNode
+
+        return scene
+    }
+
+    private func syncModelNodes(context: Context) {
+        guard let modelRootNode = context.coordinator.modelRootNode else { return }
+
+        let modelIDs = Set(models.map(\.id))
+        for (modelID, node) in context.coordinator.modelNodesByID where modelIDs.contains(modelID) == false {
+            node.removeFromParentNode()
+            context.coordinator.modelNodesByID[modelID] = nil
+            context.coordinator.modelImportScalesByID[modelID] = nil
+        }
+
         context.coordinator.modelIDsByNodeName.removeAll()
         for model in models {
-            let node = makeModelNode(for: model)
+            let node: SCNNode
+            if let existingNode = context.coordinator.modelNodesByID[model.id] {
+                node = existingNode
+            } else {
+                node = makeModelNode(for: model)
+                context.coordinator.modelNodesByID[model.id] = node
+                context.coordinator.modelImportScalesByID[model.id] = node.scale.x / max(Float(model.scalePercent) / 100, 0.0001)
+                modelRootNode.addChildNode(node)
+            }
+
             node.name = model.id.uuidString
             node.enumerateChildNodes { child, _ in
+                guard child.name != "ModelWorkspaceSceneView.selectionOutline" else { return }
                 child.name = model.id.uuidString
             }
             context.coordinator.modelIDsByNodeName[model.id.uuidString] = model.id
-            scene.rootNode.addChildNode(node)
+            applyTransform(to: node, for: model, importScale: context.coordinator.modelImportScalesByID[model.id] ?? 1)
+            node.applyDefaultMaterial(
+                surfaceColor: UIColor(hex: surfaceColor.hex),
+                isSelected: selectedModelID == model.id
+            )
         }
-
-        return scene
     }
 
     private func makeBuildPlateNode() -> SCNNode {
@@ -160,16 +221,20 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             bounds.max.z - bounds.min.z
         )
         let importScale = normalizedImportScale(for: maxDimension)
-        let modelScale = Float(model.scalePercent) / 100 * importScale
-        sourceNode.scale = SCNVector3(modelScale, modelScale, modelScale)
-        sourceNode.eulerAngles.y = Float(model.rotationDegrees * .pi / 180)
-        sourceNode.position = SCNVector3(Float(model.position.x), 0, Float(model.position.y))
+        applyTransform(to: sourceNode, for: model, importScale: importScale)
 
         if isSelected {
             sourceNode.addSelectionOutline()
         }
 
         return sourceNode
+    }
+
+    private func applyTransform(to node: SCNNode, for model: PlacedModel, importScale: Float) {
+        let modelScale = Float(model.scalePercent) / 100 * importScale
+        node.scale = SCNVector3(modelScale, modelScale, modelScale)
+        node.eulerAngles.y = Float(model.rotationDegrees * .pi / 180)
+        node.position = SCNVector3(Float(model.position.x), 0, Float(model.position.y))
     }
 
     private func loadModelNode(from url: URL) -> SCNNode? {
@@ -234,8 +299,8 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 vertices.append(
                     SCNVector3(
                         readFloat32(from: data, at: vertexOffset),
-                        readFloat32(from: data, at: vertexOffset + 4),
-                        readFloat32(from: data, at: vertexOffset + 8)
+                        readFloat32(from: data, at: vertexOffset + 8),
+                        readFloat32(from: data, at: vertexOffset + 4)
                     )
                 )
             }
@@ -260,7 +325,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                     return nil
                 }
 
-                return SCNVector3(x, y, z)
+                return SCNVector3(x, z, y)
             }
 
         guard vertices.count >= 3 else {
@@ -318,12 +383,21 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         static let secondaryClickGestureName = "ModelWorkspaceSceneView.secondaryClick"
 
         weak var sceneView: SCNView?
+        weak var cameraNode: SCNNode?
+        weak var modelRootNode: SCNNode?
         @available(iOS 16.0, *)
         weak var editMenuInteraction: UIEditMenuInteraction?
         var selectedModelID: PlacedModel.ID?
+        var modelNodesByID: [PlacedModel.ID: SCNNode] = [:]
+        var modelImportScalesByID: [PlacedModel.ID: Float] = [:]
         var modelIDsByNodeName: [String: PlacedModel.ID] = [:]
         var editMenuModelID: PlacedModel.ID?
         var editMenuLocation: CGPoint = .zero
+        var activePanModelID: PlacedModel.ID?
+        var lastPanPlatePoint: SCNVector3?
+        var activeRotationModelID: PlacedModel.ID?
+        var lastGestureRotation: CGFloat = 0
+        var lastPinchScale: CGFloat = 1
         var onSelectModel: (PlacedModel.ID?) -> Void
         var onContextAction: (ModelWorkspaceContextAction) -> Void
 
@@ -342,6 +416,25 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             guard let sceneView else { return }
 
             onSelectModel(modelID(at: recognizer.location(in: sceneView)))
+        }
+
+        @objc
+        func handleCameraZoom(_ recognizer: UIPinchGestureRecognizer) {
+            guard let cameraNode else { return }
+
+            switch recognizer.state {
+            case .began:
+                lastPinchScale = recognizer.scale
+            case .changed:
+                let relativeScale = recognizer.scale / max(lastPinchScale, 0.001)
+                lastPinchScale = recognizer.scale
+                let zoomFactor = 1 / Float(relativeScale)
+                zoomCamera(cameraNode, by: zoomFactor)
+            case .ended, .cancelled, .failed:
+                lastPinchScale = 1
+            default:
+                break
+            }
         }
 
         @objc
@@ -368,6 +461,81 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             }
         }
 
+        @objc
+        func handleModelPan(_ recognizer: UIPanGestureRecognizer) {
+            guard let sceneView else { return }
+
+            let location = recognizer.location(in: sceneView)
+            switch recognizer.state {
+            case .began:
+                guard let modelID = modelID(at: location),
+                      let platePoint = buildPlatePoint(at: location) else {
+                    activePanModelID = nil
+                    lastPanPlatePoint = nil
+                    return
+                }
+
+                activePanModelID = modelID
+                lastPanPlatePoint = platePoint
+                sceneView.allowsCameraControl = false
+                onSelectModel(modelID)
+                onContextAction(.selectModel(modelID))
+            case .changed:
+                guard let activePanModelID,
+                      let previousPoint = lastPanPlatePoint,
+                      let platePoint = buildPlatePoint(at: location) else {
+                    return
+                }
+
+                lastPanPlatePoint = platePoint
+                onContextAction(
+                    .moveModel(
+                        activePanModelID,
+                        xDelta: Double(platePoint.x - previousPoint.x),
+                        yDelta: Double(platePoint.z - previousPoint.z)
+                    )
+                )
+            case .ended, .cancelled, .failed:
+                activePanModelID = nil
+                lastPanPlatePoint = nil
+                sceneView.allowsCameraControl = true
+            default:
+                break
+            }
+        }
+
+        @objc
+        func handleModelRotation(_ recognizer: UIRotationGestureRecognizer) {
+            guard let sceneView else { return }
+
+            switch recognizer.state {
+            case .began:
+                let location = recognizer.location(in: sceneView)
+                guard let modelID = modelID(at: location) ?? selectedModelID else {
+                    activeRotationModelID = nil
+                    return
+                }
+
+                activeRotationModelID = modelID
+                lastGestureRotation = recognizer.rotation
+                sceneView.allowsCameraControl = false
+                onSelectModel(modelID)
+                onContextAction(.selectModel(modelID))
+            case .changed:
+                guard let activeRotationModelID else { return }
+
+                let deltaRadians = recognizer.rotation - lastGestureRotation
+                lastGestureRotation = recognizer.rotation
+                onContextAction(.rotateModel(activeRotationModelID, degrees: Double(deltaRadians * 180 / .pi)))
+            case .ended, .cancelled, .failed:
+                activeRotationModelID = nil
+                lastGestureRotation = 0
+                sceneView.allowsCameraControl = true
+            default:
+                break
+            }
+        }
+
         private func modelID(at point: CGPoint) -> PlacedModel.ID? {
             guard let sceneView else { return nil }
 
@@ -383,6 +551,24 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 }
                 return nil
             }.first
+        }
+
+        private func buildPlatePoint(at point: CGPoint) -> SCNVector3? {
+            guard let sceneView else { return nil }
+
+            let nearPoint = sceneView.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 0))
+            let farPoint = sceneView.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 1))
+            let yDelta = farPoint.y - nearPoint.y
+            guard abs(yDelta) > 0.0001 else { return nil }
+
+            let t = -nearPoint.y / yDelta
+            guard t.isFinite else { return nil }
+
+            return SCNVector3(
+                nearPoint.x + (farPoint.x - nearPoint.x) * t,
+                0,
+                nearPoint.z + (farPoint.z - nearPoint.z) * t
+            )
         }
 
         func menu(for modelID: PlacedModel.ID?) -> UIMenu {
@@ -406,6 +592,10 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
             let centerAction = UIAction(title: "Center on Plate", image: UIImage(systemName: "scope")) { [weak self] _ in
                 self?.onContextAction(.centerModel(modelID))
+            }
+
+            let autoOrientAction = UIAction(title: "Auto Orient", image: UIImage(systemName: "cube.transparent")) { [weak self] _ in
+                self?.onContextAction(.autoOrientModel(modelID))
             }
 
             let rotateMenu = UIMenu(title: "Rotate", image: UIImage(systemName: "rotate.3d"), children: [
@@ -438,6 +628,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 selectAction,
                 duplicateAction,
                 centerAction,
+                autoOrientAction,
                 rotateMenu,
                 scaleMenu,
                 resetAction,
@@ -452,6 +643,30 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             editMenuLocation = location
             editMenuInteraction?.presentEditMenu(
                 with: UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
+            )
+        }
+
+        func updateSelection(selectedModelID: PlacedModel.ID?) {
+            self.selectedModelID = selectedModelID
+
+            for (modelID, node) in modelNodesByID {
+                if modelID == selectedModelID {
+                    node.addSelectionOutline()
+                } else {
+                    node.removeSelectionOutline()
+                }
+            }
+        }
+
+        private func zoomCamera(_ cameraNode: SCNNode, by factor: Float) {
+            let current = cameraNode.position
+            let distance = max(sqrt(current.x * current.x + current.y * current.y + current.z * current.z), 0.001)
+            let nextDistance = min(max(distance * factor, 90), 720)
+            let distanceRatio = nextDistance / distance
+            cameraNode.position = SCNVector3(
+                current.x * distanceRatio,
+                current.y * distanceRatio,
+                current.z * distanceRatio
             )
         }
     }
@@ -565,11 +780,17 @@ private extension SCNNode {
                 for material in geometry.materials {
                     material.emission.contents = UIColor.white.withAlphaComponent(0.08)
                 }
+            } else {
+                for material in geometry.materials {
+                    material.emission.contents = UIColor.clear
+                }
             }
         }
     }
 
     func addSelectionOutline() {
+        removeSelectionOutline()
+
         let bounds = recursiveBoundingBox()
         let width = max(CGFloat(bounds.max.x - bounds.min.x), 8)
         let height = max(CGFloat(bounds.max.y - bounds.min.y), 8)
@@ -582,8 +803,15 @@ private extension SCNNode {
         outline.materials = [material]
 
         let outlineNode = SCNNode(geometry: outline)
+        outlineNode.name = Self.selectionOutlineNodeName
         outlineNode.position = SCNVector3(0, Float(height / 2), 0)
         addChildNode(outlineNode)
+    }
+
+    func removeSelectionOutline() {
+        childNodes
+            .filter { $0.name == Self.selectionOutlineNodeName }
+            .forEach { $0.removeFromParentNode() }
     }
 
     func enumerateHierarchy(_ body: (SCNNode) -> Void) {
@@ -591,6 +819,10 @@ private extension SCNNode {
         for child in childNodes {
             child.enumerateHierarchy(body)
         }
+    }
+
+    private static var selectionOutlineNodeName: String {
+        "ModelWorkspaceSceneView.selectionOutline"
     }
 }
 
