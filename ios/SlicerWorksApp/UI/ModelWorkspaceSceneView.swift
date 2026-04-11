@@ -233,13 +233,16 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
     private func makeModelNode(for model: PlacedModel) -> SCNNode {
         let isSelected = selectedModelID == model.id
-        let sourceNode = loadModelNode(from: model.sourceURL)
+        let sourceNode = generatedShapeNode(for: model, isSelected: isSelected)
+            ?? loadModelNode(from: model.sourceURL)
             ?? makeFallbackNode(for: model)
 
-        sourceNode.applyDefaultMaterial(
-            surfaceColor: UIColor(hex: surfaceColor.hex),
-            isSelected: isSelected
-        )
+        if model.generatedShape == nil {
+            sourceNode.applyDefaultMaterial(
+                surfaceColor: UIColor(hex: surfaceColor.hex),
+                isSelected: isSelected
+            )
+        }
         sourceNode.normalizePivotToBottomCenter()
 
         let bounds = sourceNode.recursiveBoundingBox()
@@ -256,6 +259,54 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         }
 
         return sourceNode
+    }
+
+    private func generatedShapeNode(for model: PlacedModel, isSelected: Bool) -> SCNNode? {
+        guard let shape = model.generatedShape else { return nil }
+
+        let geometry = SCNBox(
+            width: CGFloat(shape.widthMM),
+            height: CGFloat(shape.heightMM),
+            length: CGFloat(shape.depthMM),
+            chamferRadius: shape.operation == .negative ? 1.5 : 3
+        )
+        let material = SCNMaterial()
+        switch shape.operation {
+        case .additive:
+            material.diffuse.contents = UIColor.systemGreen.withAlphaComponent(isSelected ? 0.86 : 0.70)
+            material.emission.contents = UIColor.systemGreen.withAlphaComponent(isSelected ? 0.12 : 0.06)
+            material.transparency = 1
+        case .negative:
+            material.diffuse.contents = UIColor.systemRed.withAlphaComponent(isSelected ? 0.34 : 0.22)
+            material.emission.contents = UIColor.systemRed.withAlphaComponent(0.08)
+            material.transparency = isSelected ? 0.44 : 0.30
+        }
+        material.lightingModel = .physicallyBased
+        material.isDoubleSided = true
+        geometry.materials = [material]
+
+        let node = SCNNode(geometry: geometry)
+        node.name = model.name
+
+        let label = SCNText(
+            string: shape.operation == .negative ? "NEGATIVE" : "SKETCH",
+            extrusionDepth: 0.8
+        )
+        label.font = .systemFont(ofSize: 5, weight: .bold)
+        label.flatness = 0.2
+        let labelMaterial = SCNMaterial()
+        labelMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.82)
+        label.materials = [labelMaterial]
+        let labelNode = SCNNode(geometry: label)
+        labelNode.position = SCNVector3(
+            -Float(shape.widthMM / 2) + 4,
+            Float(shape.heightMM / 2) + 2,
+            Float(shape.depthMM / 2) + 0.5
+        )
+        labelNode.eulerAngles.x = -.pi / 2
+        node.addChildNode(labelNode)
+
+        return node
     }
 
     private func applyTransform(to node: SCNNode, for model: PlacedModel, importScale: Float) {

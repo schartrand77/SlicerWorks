@@ -55,6 +55,7 @@ struct FileSystemProjectImporter: ProjectImporting {
                     id: UUID(),
                     name: descriptor.displayName,
                     sourceURL: descriptor.storedURL,
+                    generatedShape: nil,
                     position: PlatePosition(
                         x: Double(offsetIndex * 30),
                         y: Double(offsetIndex * 20)

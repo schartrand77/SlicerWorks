@@ -239,6 +239,38 @@ final class AppStore: ObservableObject {
         selectedModelID = model.id
     }
 
+    func createSketchExtrusion(operation: SketchExtrusionOperation) {
+        guard let selectedPlateIndex else { return }
+
+        let existingSketchCount = activeProject.plates[selectedPlateIndex].models.filter { $0.generatedShape != nil }.count
+        let shape = EditableSketchExtrusion(
+            operation: operation,
+            profile: .rectangle,
+            widthMM: 48,
+            depthMM: 36,
+            heightMM: operation == .negative ? 64 : 18
+        )
+        let model = PlacedModel(
+            id: UUID(),
+            name: operation == .negative ? "Negative Sketch \(existingSketchCount + 1)" : "Sketch Extrusion \(existingSketchCount + 1)",
+            sourceURL: URL(string: "slicerworks://generated/sketch-\(UUID().uuidString)") ?? URL(fileURLWithPath: "/generated/sketch"),
+            generatedShape: shape,
+            position: PlatePosition(
+                x: Double(existingSketchCount * 18),
+                y: Double(existingSketchCount * 14)
+            ),
+            rotationDegrees: 0,
+            scalePercent: 100,
+            surfacePaintRegions: []
+        )
+
+        activeProject.plates[selectedPlateIndex].models.append(model)
+        selectedModelID = model.id
+        pencilState.lastEventSummary = operation == .negative
+            ? "Created editable negative extrusion sketch"
+            : "Created editable extruded sketch"
+    }
+
     func importModels(from urls: [URL]) {
         projectStatus = .working(message: "Importing \(urls.count) model\(urls.count == 1 ? "" : "s")...")
 
@@ -300,6 +332,7 @@ final class AppStore: ObservableObject {
             id: UUID(),
             name: copyName(for: originalModel.name, in: activeProject.plates[location.plateIndex].models),
             sourceURL: originalModel.sourceURL,
+            generatedShape: originalModel.generatedShape,
             position: PlatePosition(
                 x: clampWorkspaceCoordinate(originalModel.position.x + 24, limit: 240),
                 y: clampWorkspaceCoordinate(originalModel.position.y + 18, limit: 180)
@@ -603,7 +636,7 @@ final class AppStore: ObservableObject {
 
     private func demoProjectIfModelsAreUnavailable(_ project: SliceProject) -> SliceProject {
         let models = project.allModels
-        guard models.isEmpty || models.allSatisfy({ FileManager.default.fileExists(atPath: $0.sourceURL.path) == false }) else {
+        guard models.isEmpty || models.allSatisfy({ $0.generatedShape == nil && FileManager.default.fileExists(atPath: $0.sourceURL.path) == false }) else {
             return project
         }
 

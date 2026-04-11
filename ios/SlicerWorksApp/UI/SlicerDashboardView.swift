@@ -461,6 +461,16 @@ struct SlicerDashboardView: View {
             }
             .buttonStyle(PlainCapsuleActionStyle())
 
+            Button("Create Sketch") {
+                store.createSketchExtrusion(operation: .additive)
+            }
+            .buttonStyle(PlainCapsuleActionStyle())
+
+            Button("Create Negative Sketch") {
+                store.createSketchExtrusion(operation: .negative)
+            }
+            .buttonStyle(PlainCapsuleActionStyle())
+
             Button("Recommended Preset") {
                 store.applyRecommendedSettings()
             }

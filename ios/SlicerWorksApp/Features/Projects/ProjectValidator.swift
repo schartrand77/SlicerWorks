@@ -44,7 +44,11 @@ struct DefaultProjectValidator: ProjectValidating {
         }
 
         let unsupportedModels = models.filter { model in
-            supportedModelExtensions.contains(model.sourceURL.pathExtension.lowercased()) == false
+            if model.generatedShape != nil {
+                return false
+            }
+
+            return supportedModelExtensions.contains(model.sourceURL.pathExtension.lowercased()) == false
         }
         if unsupportedModels.isEmpty == false {
             issues.append(ProjectValidationIssue(

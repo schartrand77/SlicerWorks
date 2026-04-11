@@ -39,6 +39,7 @@ struct PlacedModel: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String
     var sourceURL: URL
+    var generatedShape: EditableSketchExtrusion?
     var position: PlatePosition
     var rotationDegrees: Double
     var scalePercent: Int
@@ -49,12 +50,30 @@ struct PlacedModel: Identifiable, Equatable, Codable {
             id: UUID(),
             name: "Axolotl",
             sourceURL: DemoModelAssets.axolotlSTLURL,
+            generatedShape: nil,
             position: position,
             rotationDegrees: 0,
             scalePercent: 100,
             surfacePaintRegions: []
         )
     }
+}
+
+struct EditableSketchExtrusion: Equatable, Codable {
+    var operation: SketchExtrusionOperation
+    var profile: SketchExtrusionProfile
+    var widthMM: Double
+    var depthMM: Double
+    var heightMM: Double
+}
+
+enum SketchExtrusionOperation: String, Codable {
+    case additive
+    case negative
+}
+
+enum SketchExtrusionProfile: String, Codable {
+    case rectangle
 }
 
 enum DemoModelAssets {
