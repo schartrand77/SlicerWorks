@@ -7,6 +7,7 @@ struct BambuPrinterAccessCodeSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var accessCode: String
+    @FocusState private var isAccessCodeFocused: Bool
 
     init(
         printer: BambuLANPrinter,
@@ -32,6 +33,11 @@ struct BambuPrinterAccessCodeSheet: View {
                     SecureField("Access code", text: $accessCode)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("printer-access-code-field")
+                        .textContentType(.oneTimeCode)
+                        .focused($isAccessCodeFocused)
+                        .submitLabel(.done)
+                        .onSubmit(saveAccessCode)
                     Text("Bambu printers in LAN mode require the printer access code before they can be added and used.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -47,13 +53,13 @@ struct BambuPrinterAccessCodeSheet: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSave(accessCode)
-                        dismiss()
-                    }
-                    .disabled(accessCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Save", action: saveAccessCode)
+                        .disabled(trimmedAccessCode.isEmpty)
                 }
             }
+        }
+        .onAppear {
+            isAccessCodeFocused = true
         }
     }
 
@@ -64,5 +70,18 @@ struct BambuPrinterAccessCodeSheet: View {
             Text(value)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var trimmedAccessCode: String {
+        accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func saveAccessCode() {
+        guard trimmedAccessCode.isEmpty == false else {
+            return
+        }
+
+        onSave(trimmedAccessCode)
+        dismiss()
     }
 }
