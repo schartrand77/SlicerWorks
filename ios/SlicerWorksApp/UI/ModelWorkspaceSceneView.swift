@@ -189,18 +189,42 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         let node = SCNNode(geometry: plate)
         node.position = SCNVector3(0, -1, 0)
 
-        let grid = SCNFloor()
-        grid.reflectivity = 0
-        let gridMaterial = SCNMaterial()
-        gridMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.05)
-        grid.materials = [gridMaterial]
-
-        let gridNode = SCNNode(geometry: grid)
-        gridNode.position = SCNVector3(0, 0.1, 0)
-        gridNode.scale = SCNVector3(0.00256, 0.00256, 0.00256)
-        node.addChildNode(gridNode)
+        node.addChildNode(makeGridNode())
 
         return node
+    }
+
+    private func makeGridNode() -> SCNNode {
+        let gridRoot = SCNNode()
+        gridRoot.name = "ModelWorkspaceSceneView.buildPlateGrid"
+
+        let lineMaterial = SCNMaterial()
+        lineMaterial.diffuse.contents = UIColor.white.withAlphaComponent(0.10)
+        lineMaterial.emission.contents = UIColor.white.withAlphaComponent(0.04)
+        lineMaterial.lightingModel = .constant
+        lineMaterial.isDoubleSided = true
+
+        let halfPlate: Float = 128
+        let lineCount = 16
+        let lineThickness: CGFloat = 0.35
+
+        for index in 0...lineCount {
+            let offset = -halfPlate + Float(index) * (halfPlate * 2 / Float(lineCount))
+
+            let xLine = SCNBox(width: CGFloat(halfPlate * 2), height: lineThickness, length: lineThickness, chamferRadius: 0)
+            xLine.materials = [lineMaterial]
+            let xNode = SCNNode(geometry: xLine)
+            xNode.position = SCNVector3(0, 1.12, offset)
+            gridRoot.addChildNode(xNode)
+
+            let zLine = SCNBox(width: lineThickness, height: lineThickness, length: CGFloat(halfPlate * 2), chamferRadius: 0)
+            zLine.materials = [lineMaterial]
+            let zNode = SCNNode(geometry: zLine)
+            zNode.position = SCNVector3(offset, 1.13, 0)
+            gridRoot.addChildNode(zNode)
+        }
+
+        return gridRoot
     }
 
     private func makeModelNode(for model: PlacedModel) -> SCNNode {
