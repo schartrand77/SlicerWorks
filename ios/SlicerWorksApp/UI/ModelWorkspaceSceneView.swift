@@ -1020,7 +1020,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
             let menuContainer = sceneView.window ?? sceneView
             let locationInContainer = sceneView.convert(location, to: menuContainer)
-            let overlayView = makeDismissOverlay(in: menuContainer)
+            let overlayView = makeMenuOverlay(in: menuContainer)
 
             let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
             blurView.layer.cornerRadius = 8
@@ -1074,6 +1074,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 y: min(max(locationInContainer.y, margin), max(menuContainer.bounds.height - menuHeight - margin, margin))
             )
             blurView.frame = CGRect(origin: origin, size: CGSize(width: menuWidth, height: menuHeight))
+            overlayView.addSubview(makeDismissControl(in: overlayView))
             overlayView.addSubview(blurView)
             menuContainer.addSubview(overlayView)
             modelActionMenuOverlayView = overlayView
@@ -1085,7 +1086,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             dismissModelActionMenu()
 
             let menuContainer = sceneView.window ?? sceneView
-            let overlayView = makeDismissOverlay(in: menuContainer)
+            let overlayView = makeMenuOverlay(in: menuContainer)
 
             let panelView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
             panelView.layer.cornerRadius = 8
@@ -1123,27 +1124,35 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 y: min(max(location.y, margin), max(menuContainer.bounds.height - menuHeight - margin, margin))
             )
             panelView.frame = CGRect(origin: origin, size: CGSize(width: menuWidth, height: menuHeight))
+            overlayView.addSubview(makeDismissControl(in: overlayView))
             overlayView.addSubview(panelView)
             menuContainer.addSubview(overlayView)
             modelActionMenuOverlayView = overlayView
         }
 
-        private func makeDismissOverlay(in menuContainer: UIView) -> UIControl {
-            let overlayView = UIControl(frame: menuContainer.bounds)
+        private func makeMenuOverlay(in menuContainer: UIView) -> UIView {
+            let overlayView = UIView(frame: menuContainer.bounds)
             overlayView.backgroundColor = .clear
             overlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            overlayView.isEnabled = false
-            overlayView.addAction(
+            return overlayView
+        }
+
+        private func makeDismissControl(in overlayView: UIView) -> UIControl {
+            let dismissControl = UIControl(frame: overlayView.bounds)
+            dismissControl.backgroundColor = .clear
+            dismissControl.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            dismissControl.isEnabled = false
+            dismissControl.addAction(
                 UIAction { [weak self] _ in
                     self?.dismissModelActionMenu()
                 },
                 for: .touchUpInside
             )
 
-            DispatchQueue.main.async { [weak overlayView] in
-                overlayView?.isEnabled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak dismissControl] in
+                dismissControl?.isEnabled = true
             }
-            return overlayView
+            return dismissControl
         }
 
         private func modelActionButton(
