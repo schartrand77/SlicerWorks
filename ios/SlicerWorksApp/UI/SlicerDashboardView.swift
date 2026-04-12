@@ -10,6 +10,7 @@ struct SlicerDashboardView: View {
     @State private var showColorPanel = true
     @State private var workspaceCamera = WorkspaceCamera()
     @State private var prepareMode: PrepareEditingMode = .layout
+    @State private var pendingSketchPlacementID: PlacedModel.ID?
     @State private var isPresentingModelImporter = false
     @State private var printerPendingAccessCodeEntry: BambuLANPrinter?
     @State private var printerPendingAccessCodeEdit: BambuLANPrinter?
@@ -255,6 +256,9 @@ struct SlicerDashboardView: View {
 
             if showInspectorPanel, let selectedModel = store.selectedModel {
                 floatingInfoCard(title: selectedModel.name) {
+                    if let selection = store.selectedSurfaceSelection {
+                        infoLine("Selection", selection.displayName)
+                    }
                     infoLine("Position", "\(Int(selectedModel.position.x)), \(Int(selectedModel.position.y))")
                     infoLine("Rotation", "\(Int(selectedModel.rotationDegrees)) deg")
                     infoLine("Scale", "\(selectedModel.scalePercent)%")
@@ -461,15 +465,42 @@ struct SlicerDashboardView: View {
             }
             .buttonStyle(PlainCapsuleActionStyle())
 
-            Button("Create Sketch") {
-                store.createSketchExtrusion(operation: .additive)
+            Menu {
+                ForEach(SketchExtrusionProfile.allCases, id: \.self) { profile in
+                    Button {
+                        pendingSketchPlacementID = store.createSketchExtrusion(operation: .additive, profile: profile)
+                    } label: {
+                        Label(profile.displayName, systemImage: profile.systemImage)
+                    }
+                }
+            } label: {
+                Label("Create Sketch", systemImage: "pencil.and.outline")
             }
             .buttonStyle(PlainCapsuleActionStyle())
 
-            Button("Create Negative Sketch") {
-                store.createSketchExtrusion(operation: .negative)
+            Menu {
+                ForEach(SketchExtrusionProfile.allCases, id: \.self) { profile in
+                    Button {
+                        pendingSketchPlacementID = store.createSketchExtrusion(operation: .negative, profile: profile)
+                    } label: {
+                        Label(profile.displayName, systemImage: profile.systemImage)
+                    }
+                }
+            } label: {
+                Label("Create Negative Sketch", systemImage: "minus.square")
             }
             .buttonStyle(PlainCapsuleActionStyle())
+
+            if let pendingSketchPlacementID,
+               store.activeProject.allModels.contains(where: { $0.id == pendingSketchPlacementID }) {
+                Button {
+                    store.confirmSketchPlacement(pendingSketchPlacementID)
+                    self.pendingSketchPlacementID = nil
+                } label: {
+                    Label("Place Sketch", systemImage: "checkmark")
+                }
+                .buttonStyle(PlainCapsuleActionStyle())
+            }
 
             Button("Recommended Preset") {
                 store.applyRecommendedSettings()
@@ -531,9 +562,13 @@ struct SlicerDashboardView: View {
                                 camera: $workspaceCamera,
                                 models: plate.models,
                                 selectedModelID: store.selectedModelID,
+                                selectedSurfaceSelection: store.selectedSurfaceSelection,
                                 surfaceColor: store.activeProject.sliceSettings.surfaceColor,
                                 onSelectModel: { modelID in
                                     store.selectModel(modelID)
+                                },
+                                onSelectSurface: { selection in
+                                    store.selectSurface(selection)
                                 },
                                 onContextAction: handleModelContextAction
                             )
@@ -640,6 +675,8 @@ struct SlicerDashboardView: View {
             store.rotateModel(modelID, by: degrees)
         case let .scaleModel(modelID, percentageDelta):
             store.scaleModel(modelID, by: percentageDelta)
+        case let .setModelScale(modelID, percentage):
+            store.setModelScale(modelID, percentage: percentage)
         case let .autoOrientModel(modelID):
             store.autoOrientModel(modelID)
         case let .resetModelTransform(modelID):

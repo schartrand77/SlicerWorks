@@ -72,8 +72,52 @@ enum SketchExtrusionOperation: String, Codable {
     case negative
 }
 
-enum SketchExtrusionProfile: String, Codable {
+enum SketchExtrusionProfile: String, CaseIterable, Codable {
+    case cylinder
+    case circle
+    case oval
     case rectangle
+    case triangle
+    case octagon
+    case hexagon
+
+    var displayName: String {
+        switch self {
+        case .cylinder:
+            return "Cylinder"
+        case .circle:
+            return "Circle"
+        case .oval:
+            return "Oval"
+        case .rectangle:
+            return "Rectangle"
+        case .triangle:
+            return "Triangle"
+        case .octagon:
+            return "Octagon"
+        case .hexagon:
+            return "Hexagon"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .cylinder:
+            return "cylinder"
+        case .circle:
+            return "circle"
+        case .oval:
+            return "oval"
+        case .rectangle:
+            return "rectangle"
+        case .triangle:
+            return "triangle"
+        case .octagon:
+            return "octagon"
+        case .hexagon:
+            return "hexagon"
+        }
+    }
 }
 
 enum DemoModelAssets {
@@ -95,6 +139,40 @@ struct SurfacePaintRegion: Identifiable, Equatable, Codable {
     var points: [CGPoint]
     var forceSamples: [CGFloat]
     var rollAngle: CGFloat
+}
+
+struct ModelSurfaceSelection: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case face
+        case edge
+    }
+
+    var id: String {
+        "\(modelID.uuidString)-\(kindLabel)-\(faceIndex)-\(edgeIndex ?? -1)"
+    }
+
+    var modelID: PlacedModel.ID
+    var kind: Kind
+    var faceIndex: Int
+    var edgeIndex: Int?
+
+    var displayName: String {
+        switch kind {
+        case .face:
+            return "Face \(faceIndex + 1)"
+        case .edge:
+            return "Edge \(faceIndex + 1).\(edgeIndex.map { $0 + 1 } ?? 1)"
+        }
+    }
+
+    private var kindLabel: String {
+        switch kind {
+        case .face:
+            return "face"
+        case .edge:
+            return "edge"
+        }
+    }
 }
 
 struct MaterialAssignment: Equatable, Codable {

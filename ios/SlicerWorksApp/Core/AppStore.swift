@@ -6,7 +6,14 @@ import SwiftUI
 @MainActor
 final class AppStore: ObservableObject {
     @Published var selectedPlateID: BuildPlate.ID? = SliceProject.example.plates.first?.id
-    @Published var selectedModelID: PlacedModel.ID? = SliceProject.example.plates.first?.models.first?.id
+    @Published var selectedModelID: PlacedModel.ID? = SliceProject.example.plates.first?.models.first?.id {
+        didSet {
+            if selectedSurfaceSelection?.modelID != selectedModelID {
+                selectedSurfaceSelection = nil
+            }
+        }
+    }
+    @Published var selectedSurfaceSelection: ModelSurfaceSelection?
     @Published var selectedPrinter: BambuPrinterProfile = .x1Carbon {
         didSet {
             handleProjectStateChange()
@@ -239,20 +246,24 @@ final class AppStore: ObservableObject {
         selectedModelID = model.id
     }
 
-    func createSketchExtrusion(operation: SketchExtrusionOperation) {
-        guard let selectedPlateIndex else { return }
+    @discardableResult
+    func createSketchExtrusion(operation: SketchExtrusionOperation, profile: SketchExtrusionProfile) -> PlacedModel.ID? {
+        guard let selectedPlateIndex else { return nil }
 
         let existingSketchCount = activeProject.plates[selectedPlateIndex].models.filter { $0.generatedShape != nil }.count
+        let dimensions = sketchDimensions(for: profile, operation: operation)
         let shape = EditableSketchExtrusion(
             operation: operation,
-            profile: .rectangle,
-            widthMM: 48,
-            depthMM: 36,
-            heightMM: operation == .negative ? 64 : 18
+            profile: profile,
+            widthMM: dimensions.width,
+            depthMM: dimensions.depth,
+            heightMM: dimensions.height
         )
         let model = PlacedModel(
             id: UUID(),
-            name: operation == .negative ? "Negative Sketch \(existingSketchCount + 1)" : "Sketch Extrusion \(existingSketchCount + 1)",
+            name: operation == .negative
+                ? "Negative \(profile.displayName) \(existingSketchCount + 1)"
+                : "\(profile.displayName) Sketch \(existingSketchCount + 1)",
             sourceURL: URL(string: "slicerworks://generated/sketch-\(UUID().uuidString)") ?? URL(fileURLWithPath: "/generated/sketch"),
             generatedShape: shape,
             position: PlatePosition(
@@ -267,8 +278,19 @@ final class AppStore: ObservableObject {
         activeProject.plates[selectedPlateIndex].models.append(model)
         selectedModelID = model.id
         pencilState.lastEventSummary = operation == .negative
-            ? "Created editable negative extrusion sketch"
-            : "Created editable extruded sketch"
+            ? "Place the negative \(profile.displayName.lowercased()), then tap the checkmark"
+            : "Place the \(profile.displayName.lowercased()), then tap the checkmark"
+        return model.id
+    }
+
+    func confirmSketchPlacement(_ modelID: PlacedModel.ID) {
+        guard let model = activeProject.allModels.first(where: { $0.id == modelID }),
+              model.generatedShape != nil else {
+            return
+        }
+
+        selectedModelID = modelID
+        pencilState.lastEventSummary = "Placed \(model.name)"
     }
 
     func importModels(from urls: [URL]) {
@@ -293,9 +315,23 @@ final class AppStore: ObservableObject {
 
     func selectModel(_ modelID: PlacedModel.ID?) {
         selectedModelID = modelID
+        selectedSurfaceSelection = nil
         if let selectedModel {
             pencilState.lastEventSummary = "Selected \(selectedModel.name). Pencil edits apply to this model only."
         }
+    }
+
+    func selectSurface(_ selection: ModelSurfaceSelection?) {
+        if selection != nil {
+            selectedModelID = nil
+        }
+        selectedSurfaceSelection = selection
+
+        guard let selection else {
+            return
+        }
+
+        pencilState.lastEventSummary = "\(selection.displayName) selected. Double-tap the model to select the whole object."
     }
 
     func moveSelectedModel(by translation: CGSize) {
@@ -399,6 +435,12 @@ final class AppStore: ObservableObject {
     func scaleModel(_ modelID: PlacedModel.ID, by percentageDelta: Int) {
         updateModel(modelID) { model in
             model.scalePercent = min(max(model.scalePercent + percentageDelta, 25), 400)
+        }
+    }
+
+    func setModelScale(_ modelID: PlacedModel.ID, percentage: Int) {
+        updateModel(modelID) { model in
+            model.scalePercent = min(max(percentage, 25), 400)
         }
     }
 
@@ -584,6 +626,29 @@ final class AppStore: ObservableObject {
     private func normalizedRotation(_ degrees: Double) -> Double {
         let normalized = degrees.truncatingRemainder(dividingBy: 360)
         return normalized < 0 ? normalized + 360 : normalized
+    }
+
+    private func sketchDimensions(for profile: SketchExtrusionProfile, operation: SketchExtrusionOperation) -> (width: Double, depth: Double, height: Double) {
+        let base: (width: Double, depth: Double, height: Double) = switch profile {
+        case .cylinder:
+            (42, 42, 42)
+        case .circle:
+            (44, 44, 14)
+        case .oval:
+            (58, 34, 14)
+        case .rectangle:
+            (48, 36, 18)
+        case .triangle:
+            (48, 48, 18)
+        case .octagon:
+            (48, 48, 18)
+        case .hexagon:
+            (46, 46, 18)
+        }
+
+        return operation == .negative
+            ? (base.width, base.depth, max(base.height, 64))
+            : base
     }
 
     @discardableResult

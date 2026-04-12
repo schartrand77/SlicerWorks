@@ -283,9 +283,13 @@ struct ModelPaintingView: View {
                     camera: $workspaceCamera,
                     models: [selectedModel],
                     selectedModelID: selectedModel.id,
+                    selectedSurfaceSelection: store.selectedSurfaceSelection,
                     surfaceColor: store.activeProject.sliceSettings.surfaceColor,
                     onSelectModel: { modelID in
                         store.selectModel(modelID)
+                    },
+                    onSelectSurface: { selection in
+                        store.selectSurface(selection)
                     },
                     onContextAction: handleModelContextAction
                 )
@@ -311,6 +315,8 @@ struct ModelPaintingView: View {
             store.rotateModel(modelID, by: degrees)
         case let .scaleModel(modelID, percentageDelta):
             store.scaleModel(modelID, by: percentageDelta)
+        case let .setModelScale(modelID, percentage):
+            store.setModelScale(modelID, percentage: percentage)
         case let .autoOrientModel(modelID):
             store.autoOrientModel(modelID)
         case let .resetModelTransform(modelID):

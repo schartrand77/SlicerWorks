@@ -1,6 +1,11 @@
 import SwiftUI
 import UIKit
 
+enum ApplePencilScreenContactNotification {
+    static let name = Notification.Name("SlicerWorksApplePencilScreenContactDidChange")
+    static let isActiveKey = "isActive"
+}
+
 struct ApplePencilCanvasView: UIViewRepresentable {
     var onHoverChanged: (CGPoint?, CGFloat, CGFloat, CGFloat, CGFloat) -> Void
     var onStrokeBegan: (CGPoint, CGFloat, CGFloat, CGFloat) -> Void
@@ -119,6 +124,7 @@ final class PencilCanvasUIView: UIView {
             return
         }
 
+        postPencilScreenContactChanged(isActive: true)
         onStrokeBegan?(
             touch.preciseLocation(in: self),
             touch.force,
@@ -154,11 +160,21 @@ final class PencilCanvasUIView: UIView {
             touch.rollAngle
         )
         onStrokeEnded?()
+        postPencilScreenContactChanged(isActive: false)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         onStrokeEnded?()
+        postPencilScreenContactChanged(isActive: false)
         super.touchesCancelled(touches, with: event)
+    }
+
+    private func postPencilScreenContactChanged(isActive: Bool) {
+        NotificationCenter.default.post(
+            name: ApplePencilScreenContactNotification.name,
+            object: self,
+            userInfo: [ApplePencilScreenContactNotification.isActiveKey: isActive]
+        )
     }
 
     @objc

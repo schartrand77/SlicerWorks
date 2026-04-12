@@ -1,5 +1,6 @@
 import SceneKit
 import SwiftUI
+import UIKit
 
 enum ModelWorkspaceContextAction {
     case selectModel(PlacedModel.ID?)
@@ -9,6 +10,7 @@ enum ModelWorkspaceContextAction {
     case moveModel(PlacedModel.ID, xDelta: Double, yDelta: Double)
     case rotateModel(PlacedModel.ID, degrees: Double)
     case scaleModel(PlacedModel.ID, percentageDelta: Int)
+    case setModelScale(PlacedModel.ID, percentage: Int)
     case autoOrientModel(PlacedModel.ID)
     case resetModelTransform(PlacedModel.ID)
 }
@@ -17,15 +19,19 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
     @Binding var camera: WorkspaceCamera
     let models: [PlacedModel]
     let selectedModelID: PlacedModel.ID?
+    let selectedSurfaceSelection: ModelSurfaceSelection?
     let surfaceColor: PrintColorOption
     let onSelectModel: (PlacedModel.ID?) -> Void
+    let onSelectSurface: (ModelSurfaceSelection?) -> Void
     var onContextAction: (ModelWorkspaceContextAction) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             camera: $camera,
             selectedModelID: selectedModelID,
+            selectedSurfaceSelection: selectedSurfaceSelection,
             onSelectModel: onSelectModel,
+            onSelectSurface: onSelectSurface,
             onContextAction: onContextAction
         )
     }
@@ -43,6 +49,14 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             tapGesture.buttonMaskRequired = .primary
         }
         view.addGestureRecognizer(tapGesture)
+
+        let doubleTapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTapGesture.numberOfTapsRequired = 2
+        if #available(iOS 13.4, *) {
+            doubleTapGesture.buttonMaskRequired = .primary
+        }
+        view.addGestureRecognizer(doubleTapGesture)
+        tapGesture.require(toFail: doubleTapGesture)
 
         let zoomGesture = UIPinchGestureRecognizer(
             target: context.coordinator,
@@ -89,12 +103,8 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         longPressGesture.delegate = context.coordinator
         view.addGestureRecognizer(longPressGesture)
         view.installPencilInteraction(delegate: context.coordinator)
-        if #available(iOS 16.0, *) {
-            let editMenuInteraction = UIEditMenuInteraction(delegate: context.coordinator)
-            view.addInteraction(editMenuInteraction)
-            context.coordinator.editMenuInteraction = editMenuInteraction
-        }
         context.coordinator.sceneView = view
+        context.coordinator.installPencilFrameRateLock(for: view)
         syncModelNodes(context: context)
 
         return view
@@ -103,11 +113,16 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
     func updateUIView(_ view: SCNView, context: Context) {
         context.coordinator.camera = $camera
         context.coordinator.selectedModelID = selectedModelID
+        context.coordinator.selectedSurfaceSelection = selectedSurfaceSelection
         context.coordinator.onSelectModel = onSelectModel
+        context.coordinator.onSelectSurface = onSelectSurface
         context.coordinator.onContextAction = onContextAction
         context.coordinator.sceneView = view
         syncModelNodes(context: context)
-        context.coordinator.updateSelection(selectedModelID: selectedModelID)
+        context.coordinator.updateSelection(
+            selectedModelID: selectedModelID,
+            selectedSurfaceSelection: selectedSurfaceSelection
+        )
     }
 
     private func makeScene(context: Context) -> SCNScene {
@@ -155,6 +170,8 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             node.removeFromParentNode()
             context.coordinator.modelNodesByID[modelID] = nil
             context.coordinator.modelImportScalesByID[modelID] = nil
+            context.coordinator.modelSketchOperationsByID[modelID] = nil
+            context.coordinator.modelScalePercentsByID[modelID] = nil
         }
 
         context.coordinator.modelIDsByNodeName.removeAll()
@@ -171,14 +188,19 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
             node.name = model.id.uuidString
             node.enumerateChildNodes { child, _ in
-                guard child.name != "ModelWorkspaceSceneView.selectionOutline" else { return }
+                guard child.name != "ModelWorkspaceSceneView.selectionOutline",
+                      child.name != Coordinator.surfaceHighlightNodeName else {
+                    return
+                }
                 child.name = model.id.uuidString
             }
             context.coordinator.modelIDsByNodeName[model.id.uuidString] = model.id
+            context.coordinator.modelSketchOperationsByID[model.id] = model.generatedShape?.operation
+            context.coordinator.modelScalePercentsByID[model.id] = model.scalePercent
             applyTransform(to: node, for: model, importScale: context.coordinator.modelImportScalesByID[model.id] ?? 1)
             node.applyDefaultMaterial(
                 surfaceColor: UIColor(hex: surfaceColor.hex),
-                isSelected: selectedModelID == model.id
+                isSelected: selectedModelID == model.id && selectedSurfaceSelection?.modelID != model.id
             )
         }
     }
@@ -264,12 +286,6 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
     private func generatedShapeNode(for model: PlacedModel, isSelected: Bool) -> SCNNode? {
         guard let shape = model.generatedShape else { return nil }
 
-        let geometry = SCNBox(
-            width: CGFloat(shape.widthMM),
-            height: CGFloat(shape.heightMM),
-            length: CGFloat(shape.depthMM),
-            chamferRadius: shape.operation == .negative ? 1.5 : 3
-        )
         let material = SCNMaterial()
         switch shape.operation {
         case .additive:
@@ -283,13 +299,15 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         }
         material.lightingModel = .physicallyBased
         material.isDoubleSided = true
-        geometry.materials = [material]
 
-        let node = SCNNode(geometry: geometry)
+        let node = SCNNode()
         node.name = model.name
+        let shapeNode = sketchProfileNode(for: shape)
+        shapeNode.geometry?.materials = [material]
+        node.addChildNode(shapeNode)
 
         let label = SCNText(
-            string: shape.operation == .negative ? "NEGATIVE" : "SKETCH",
+            string: shape.operation == .negative ? "NEGATIVE" : shape.profile.displayName.uppercased(),
             extrusionDepth: 0.8
         )
         label.font = .systemFont(ofSize: 5, weight: .bold)
@@ -307,6 +325,41 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         node.addChildNode(labelNode)
 
         return node
+    }
+
+    private func sketchProfileNode(for shape: EditableSketchExtrusion) -> SCNNode {
+        switch shape.profile {
+        case .rectangle:
+            let geometry = SCNBox(
+                width: CGFloat(shape.widthMM),
+                height: CGFloat(shape.heightMM),
+                length: CGFloat(shape.depthMM),
+                chamferRadius: shape.operation == .negative ? 1.5 : 3
+            )
+            return SCNNode(geometry: geometry)
+        case .cylinder, .circle, .triangle, .hexagon, .octagon:
+            let geometry = SCNCylinder(
+                radius: CGFloat(max(shape.widthMM, shape.depthMM) / 2),
+                height: CGFloat(shape.heightMM)
+            )
+            geometry.radialSegmentCount = switch shape.profile {
+            case .triangle:
+                3
+            case .hexagon:
+                6
+            case .octagon:
+                8
+            default:
+                64
+            }
+            return SCNNode(geometry: geometry)
+        case .oval:
+            let geometry = SCNCylinder(radius: 1, height: CGFloat(shape.heightMM))
+            geometry.radialSegmentCount = 64
+            let node = SCNNode(geometry: geometry)
+            node.scale = SCNVector3(Float(shape.widthMM / 2), 1, Float(shape.depthMM / 2))
+            return node
+        }
     }
 
     private func applyTransform(to node: SCNNode, for model: PlacedModel, importScale: Float) {
@@ -460,44 +513,125 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         static let secondaryClickGestureName = "ModelWorkspaceSceneView.secondaryClick"
+        static let surfaceHighlightNodeName = "ModelWorkspaceSceneView.surfaceHighlight"
 
         var camera: Binding<WorkspaceCamera>
         weak var sceneView: SCNView?
         weak var cameraNode: SCNNode?
         weak var modelRootNode: SCNNode?
-        @available(iOS 16.0, *)
-        weak var editMenuInteraction: UIEditMenuInteraction?
         var selectedModelID: PlacedModel.ID?
+        var selectedSurfaceSelection: ModelSurfaceSelection?
+        weak var selectedSurfaceHighlightNode: SCNNode?
+        weak var modelActionMenuOverlayView: UIView?
         var modelNodesByID: [PlacedModel.ID: SCNNode] = [:]
         var modelImportScalesByID: [PlacedModel.ID: Float] = [:]
         var modelIDsByNodeName: [String: PlacedModel.ID] = [:]
-        var editMenuModelID: PlacedModel.ID?
-        var editMenuLocation: CGPoint = .zero
+        var modelSketchOperationsByID: [PlacedModel.ID: SketchExtrusionOperation] = [:]
+        var modelScalePercentsByID: [PlacedModel.ID: Int] = [:]
         var activePanModelID: PlacedModel.ID?
         var lastPanPlatePoint: SCNVector3?
         var activeRotationModelID: PlacedModel.ID?
         var lastGestureRotation: CGFloat = 0
         var lastPinchScale: CGFloat = 1
+        private var pencilContactObserver: NSObjectProtocol?
+        private var preferredFramesPerSecondBeforePencilContact: Int?
+        private var wasPlayingBeforePencilContact: Bool?
         var onSelectModel: (PlacedModel.ID?) -> Void
+        var onSelectSurface: (ModelSurfaceSelection?) -> Void
         var onContextAction: (ModelWorkspaceContextAction) -> Void
 
         init(
             camera: Binding<WorkspaceCamera>,
             selectedModelID: PlacedModel.ID?,
+            selectedSurfaceSelection: ModelSurfaceSelection?,
             onSelectModel: @escaping (PlacedModel.ID?) -> Void,
+            onSelectSurface: @escaping (ModelSurfaceSelection?) -> Void,
             onContextAction: @escaping (ModelWorkspaceContextAction) -> Void
         ) {
             self.camera = camera
             self.selectedModelID = selectedModelID
+            self.selectedSurfaceSelection = selectedSurfaceSelection
             self.onSelectModel = onSelectModel
+            self.onSelectSurface = onSelectSurface
             self.onContextAction = onContextAction
+        }
+
+        deinit {
+            if let pencilContactObserver {
+                NotificationCenter.default.removeObserver(pencilContactObserver)
+            }
+        }
+
+        func installPencilFrameRateLock(for view: SCNView) {
+            guard pencilContactObserver == nil else { return }
+
+            pencilContactObserver = NotificationCenter.default.addObserver(
+                forName: ApplePencilScreenContactNotification.name,
+                object: nil,
+                queue: .main
+            ) { [weak self, weak view] notification in
+                guard let self,
+                      let view,
+                      let isActive = notification.userInfo?[ApplePencilScreenContactNotification.isActiveKey] as? Bool else {
+                    return
+                }
+
+                self.setPencilFrameRateLock(isActive, for: view)
+            }
+        }
+
+        private func setPencilFrameRateLock(_ isActive: Bool, for view: SCNView) {
+            if isActive {
+                if preferredFramesPerSecondBeforePencilContact == nil {
+                    preferredFramesPerSecondBeforePencilContact = view.preferredFramesPerSecond
+                    wasPlayingBeforePencilContact = view.isPlaying
+                }
+
+                view.preferredFramesPerSecond = 120
+                view.isPlaying = true
+            } else {
+                if let preferredFramesPerSecondBeforePencilContact {
+                    view.preferredFramesPerSecond = preferredFramesPerSecondBeforePencilContact
+                }
+                if let wasPlayingBeforePencilContact {
+                    view.isPlaying = wasPlayingBeforePencilContact
+                }
+
+                preferredFramesPerSecondBeforePencilContact = nil
+                wasPlayingBeforePencilContact = nil
+            }
         }
 
         @objc
         func handleTap(_ recognizer: UITapGestureRecognizer) {
             guard let sceneView else { return }
 
-            onSelectModel(modelID(at: recognizer.location(in: sceneView)))
+            dismissModelActionMenu()
+            guard let hit = modelHit(at: recognizer.location(in: sceneView)) else {
+                clearSurfaceHighlight()
+                onSelectSurface(nil)
+                onSelectModel(nil)
+                return
+            }
+
+            selectedSurfaceSelection = hit.selection
+            addSurfaceHighlight(for: hit)
+            onSelectSurface(hit.selection)
+        }
+
+        @objc
+        func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let sceneView else { return }
+
+            let modelID = modelID(at: recognizer.location(in: sceneView))
+            clearSurfaceHighlight()
+            onSelectSurface(nil)
+            onSelectModel(modelID)
+            onContextAction(.selectModel(modelID))
+
+            if let modelID {
+                presentModelActionMenu(for: modelID, at: recognizer.location(in: sceneView))
+            }
         }
 
         @objc
@@ -526,9 +660,12 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 return
             }
 
-            if #available(iOS 16.0, *) {
-                presentEditMenu(at: recognizer.location(in: sceneView))
-            }
+            let modelID = modelID(at: recognizer.location(in: sceneView))
+            dismissModelActionMenu()
+            clearSurfaceHighlight()
+            onSelectSurface(nil)
+            onSelectModel(modelID)
+            onContextAction(.selectModel(modelID))
         }
 
         @objc
@@ -538,9 +675,12 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
                 return
             }
 
-            if #available(iOS 16.0, *) {
-                presentEditMenu(at: recognizer.location(in: sceneView))
-            }
+            let modelID = modelID(at: recognizer.location(in: sceneView))
+            dismissModelActionMenu()
+            clearSurfaceHighlight()
+            onSelectSurface(nil)
+            onSelectModel(modelID)
+            onContextAction(.selectModel(modelID))
         }
 
         @objc
@@ -550,6 +690,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             let location = recognizer.location(in: sceneView)
             switch recognizer.state {
             case .began:
+                dismissModelActionMenu()
                 guard let modelID = modelID(at: location),
                       let platePoint = buildPlatePoint(at: location) else {
                     activePanModelID = nil
@@ -592,6 +733,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
             switch recognizer.state {
             case .began:
+                dismissModelActionMenu()
                 let location = recognizer.location(in: sceneView)
                 guard let modelID = modelID(at: location) ?? selectedModelID else {
                     activeRotationModelID = nil
@@ -618,21 +760,206 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             }
         }
 
+        private struct ModelHit {
+            var selection: ModelSurfaceSelection
+            var result: SCNHitTestResult
+            var edgeVertices: (SCNVector3, SCNVector3)?
+        }
+
         private func modelID(at point: CGPoint) -> PlacedModel.ID? {
+            modelHitResult(at: point)?.modelID
+        }
+
+        private func modelHit(at point: CGPoint) -> ModelHit? {
+            guard let hitResult = modelHitResult(at: point) else { return nil }
+
+            let edgeHit = nearestTriangleEdge(in: hitResult.result, at: point)
+            let selection = ModelSurfaceSelection(
+                modelID: hitResult.modelID,
+                kind: edgeHit == nil ? .face : .edge,
+                faceIndex: max(hitResult.result.faceIndex, 0),
+                edgeIndex: edgeHit?.index
+            )
+
+            return ModelHit(
+                selection: selection,
+                result: hitResult.result,
+                edgeVertices: edgeHit.map { ($0.start, $0.end) }
+            )
+        }
+
+        private func modelHitResult(at point: CGPoint) -> (modelID: PlacedModel.ID, result: SCNHitTestResult)? {
             guard let sceneView else { return nil }
 
             let hitResults = sceneView.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue])
-            return hitResults.lazy.compactMap { result -> PlacedModel.ID? in
+            return hitResults.lazy.compactMap { result -> (PlacedModel.ID, SCNHitTestResult)? in
                 var node: SCNNode? = result.node
                 while let currentNode = node {
                     if let name = currentNode.name,
                        let modelID = self.modelIDsByNodeName[name] {
-                        return modelID
+                        return (modelID, result)
                     }
                     node = currentNode.parent
                 }
                 return nil
             }.first
+        }
+
+        private func nearestTriangleEdge(
+            in hitResult: SCNHitTestResult,
+            at point: CGPoint
+        ) -> (index: Int, start: SCNVector3, end: SCNVector3)? {
+            guard let sceneView,
+                  let triangle = hitResult.node.geometry?.triangleVertices(
+                    geometryIndex: hitResult.geometryIndex,
+                    faceIndex: hitResult.faceIndex
+                  ) else {
+                return nil
+            }
+
+            let edges = [
+                (triangle.0, triangle.1),
+                (triangle.1, triangle.2),
+                (triangle.2, triangle.0)
+            ]
+            let projectedEdges = edges.enumerated().map { index, edge in
+                let start = sceneView.projectPoint(hitResult.node.convertPosition(edge.0, to: nil))
+                let end = sceneView.projectPoint(hitResult.node.convertPosition(edge.1, to: nil))
+                let distance = point.distanceToSegment(
+                    from: CGPoint(x: CGFloat(start.x), y: CGFloat(start.y)),
+                    to: CGPoint(x: CGFloat(end.x), y: CGFloat(end.y))
+                )
+                return (index: index, start: edge.0, end: edge.1, distance: distance)
+            }
+
+            guard let nearest = projectedEdges.min(by: { $0.distance < $1.distance }),
+                  nearest.distance <= 12 else {
+                return nil
+            }
+
+            return (nearest.index, nearest.1, nearest.2)
+        }
+
+        private func addSurfaceHighlight(for hit: ModelHit) {
+            clearSurfaceHighlight()
+
+            let highlightNode: SCNNode
+            switch hit.selection.kind {
+            case .face:
+                highlightNode = faceExtrusionHighlightNode(for: hit)
+            case .edge:
+                if let edgeVertices = hit.edgeVertices {
+                    highlightNode = edgeHighlightNode(from: edgeVertices.0, to: edgeVertices.1)
+                } else {
+                    let marker = SCNSphere(radius: 4)
+                    let material = SCNMaterial()
+                    material.diffuse.contents = UIColor.systemGreen.withAlphaComponent(0.85)
+                    material.emission.contents = UIColor.systemGreen.withAlphaComponent(0.35)
+                    marker.materials = [material]
+                    highlightNode = SCNNode(geometry: marker)
+                    highlightNode.position = hit.result.localCoordinates
+                }
+            }
+
+            highlightNode.name = Self.surfaceHighlightNodeName
+            hit.result.node.addChildNode(highlightNode)
+            selectedSurfaceHighlightNode = highlightNode
+        }
+
+        private func faceExtrusionHighlightNode(for hit: ModelHit) -> SCNNode {
+            let rootNode = SCNNode()
+            rootNode.position = hit.result.localCoordinates
+
+            let operation = modelSketchOperationsByID[hit.selection.modelID] ?? .additive
+            let color = extrusionColor(for: operation)
+            let direction = extrusionDirection(for: operation, normal: hit.result.localNormal.normalized())
+
+            let marker = SCNPlane(width: 12, height: 12)
+            let markerMaterial = SCNMaterial()
+            markerMaterial.diffuse.contents = color.withAlphaComponent(0.35)
+            markerMaterial.emission.contents = color.withAlphaComponent(0.55)
+            markerMaterial.isDoubleSided = true
+            marker.materials = [markerMaterial]
+
+            let markerNode = SCNNode(geometry: marker)
+            markerNode.position = hit.result.localNormal.normalized() * 0.8
+            markerNode.look(at: markerNode.position + hit.result.localNormal)
+            rootNode.addChildNode(markerNode)
+
+            rootNode.addChildNode(extrusionArrowNode(direction: direction, color: color))
+            return rootNode
+        }
+
+        private func extrusionArrowNode(direction: SCNVector3, color: UIColor) -> SCNNode {
+            let rootNode = SCNNode()
+            let shaftLength: CGFloat = 20
+            let headHeight: CGFloat = 8
+
+            let material = SCNMaterial()
+            material.diffuse.contents = color.withAlphaComponent(0.92)
+            material.emission.contents = color.withAlphaComponent(0.45)
+
+            let shaftGeometry = SCNCylinder(radius: 1.2, height: shaftLength)
+            shaftGeometry.materials = [material]
+            let shaftNode = SCNNode(geometry: shaftGeometry)
+            shaftNode.position = direction * Float(shaftLength / 2 + 6)
+            shaftNode.alignYAxis(to: direction)
+            rootNode.addChildNode(shaftNode)
+
+            let headGeometry = SCNCone(topRadius: 0, bottomRadius: 4.2, height: headHeight)
+            headGeometry.materials = [material]
+            let headNode = SCNNode(geometry: headGeometry)
+            headNode.position = direction * Float(shaftLength + headHeight / 2 + 6)
+            headNode.alignYAxis(to: direction)
+            rootNode.addChildNode(headNode)
+
+            return rootNode
+        }
+
+        private func extrusionDirection(for operation: SketchExtrusionOperation, normal: SCNVector3) -> SCNVector3 {
+            switch operation {
+            case .additive:
+                return normal
+            case .negative:
+                return normal * -1
+            }
+        }
+
+        private func extrusionColor(for operation: SketchExtrusionOperation) -> UIColor {
+            switch operation {
+            case .additive:
+                return .systemGreen
+            case .negative:
+                return .systemRed
+            }
+        }
+
+        private func edgeHighlightNode(from start: SCNVector3, to end: SCNVector3) -> SCNNode {
+            let vector = end - start
+            let length = max(CGFloat(vector.length), 0.01)
+            let geometry = SCNCylinder(radius: 1.8, height: length)
+            let material = SCNMaterial()
+            material.diffuse.contents = UIColor.systemGreen.withAlphaComponent(0.90)
+            material.emission.contents = UIColor.systemGreen.withAlphaComponent(0.50)
+            geometry.materials = [material]
+
+            let node = SCNNode(geometry: geometry)
+            node.position = (start + end) * 0.5
+            node.eulerAngles = SCNVector3Make(Float.pi / 2, 0, 0)
+            node.look(at: end, up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 1, 0))
+            return node
+        }
+
+        private func clearSurfaceHighlight() {
+            selectedSurfaceHighlightNode?.removeFromParentNode()
+            selectedSurfaceHighlightNode = nil
+            for node in modelNodesByID.values {
+                node.enumerateHierarchy { child in
+                    if child.name == Self.surfaceHighlightNodeName {
+                        child.removeFromParentNode()
+                    }
+                }
+            }
         }
 
         private func buildPlatePoint(at point: CGPoint) -> SCNVector3? {
@@ -653,86 +980,317 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             )
         }
 
-        func menu(for modelID: PlacedModel.ID?) -> UIMenu {
-            guard let modelID else {
-                return UIMenu(children: [
-                    UIAction(title: "Clear Selection", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in
-                        self?.onSelectModel(nil)
-                        self?.onContextAction(.selectModel(nil))
-                    }
-                ])
-            }
+        func presentModelActionMenu(for modelID: PlacedModel.ID, at location: CGPoint) {
+            guard let sceneView else { return }
 
-            let selectAction = UIAction(title: "Select", image: UIImage(systemName: "checkmark.circle")) { [weak self] _ in
-                self?.onSelectModel(modelID)
-                self?.onContextAction(.selectModel(modelID))
-            }
+            dismissModelActionMenu()
 
-            let duplicateAction = UIAction(title: "Duplicate", image: UIImage(systemName: "plus.square.on.square")) { [weak self] _ in
-                self?.onContextAction(.duplicateModel(modelID))
-            }
-
-            let centerAction = UIAction(title: "Center on Plate", image: UIImage(systemName: "scope")) { [weak self] _ in
-                self?.onContextAction(.centerModel(modelID))
-            }
-
-            let autoOrientAction = UIAction(title: "Auto Orient", image: UIImage(systemName: "cube.transparent")) { [weak self] _ in
-                self?.onContextAction(.autoOrientModel(modelID))
-            }
-
-            let rotateMenu = UIMenu(title: "Rotate", image: UIImage(systemName: "rotate.3d"), children: [
-                UIAction(title: "Rotate Left 45 deg", image: UIImage(systemName: "rotate.left")) { [weak self] _ in
-                    self?.onContextAction(.rotateModel(modelID, degrees: -45))
+            let menuContainer = sceneView.window ?? sceneView
+            let locationInContainer = sceneView.convert(location, to: menuContainer)
+            let overlayView = UIControl(frame: menuContainer.bounds)
+            overlayView.backgroundColor = .clear
+            overlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlayView.addAction(
+                UIAction { [weak self] _ in
+                    self?.dismissModelActionMenu()
                 },
-                UIAction(title: "Rotate Right 45 deg", image: UIImage(systemName: "rotate.right")) { [weak self] _ in
-                    self?.onContextAction(.rotateModel(modelID, degrees: 45))
-                }
-            ])
-
-            let scaleMenu = UIMenu(title: "Scale", image: UIImage(systemName: "arrow.up.left.and.arrow.down.right"), children: [
-                UIAction(title: "Scale Up 10%", image: UIImage(systemName: "plus.magnifyingglass")) { [weak self] _ in
-                    self?.onContextAction(.scaleModel(modelID, percentageDelta: 10))
-                },
-                UIAction(title: "Scale Down 10%", image: UIImage(systemName: "minus.magnifyingglass")) { [weak self] _ in
-                    self?.onContextAction(.scaleModel(modelID, percentageDelta: -10))
-                }
-            ])
-
-            let resetAction = UIAction(title: "Reset Transform", image: UIImage(systemName: "arrow.counterclockwise")) { [weak self] _ in
-                self?.onContextAction(.resetModelTransform(modelID))
-            }
-
-            let deleteAction = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
-                self?.onContextAction(.deleteModel(modelID))
-            }
-
-            return UIMenu(children: [
-                selectAction,
-                duplicateAction,
-                centerAction,
-                autoOrientAction,
-                rotateMenu,
-                scaleMenu,
-                resetAction,
-                deleteAction
-            ])
-        }
-
-        @available(iOS 16.0, *)
-        func presentEditMenu(at location: CGPoint) {
-            let menuModelID = modelID(at: location) ?? selectedModelID
-            editMenuModelID = menuModelID
-            editMenuLocation = location
-            editMenuInteraction?.presentEditMenu(
-                with: UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
+                for: .touchUpInside
             )
+
+            let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
+            blurView.layer.cornerRadius = 8
+            blurView.layer.cornerCurve = .continuous
+            blurView.clipsToBounds = true
+            blurView.layer.borderColor = UIColor.white.withAlphaComponent(0.16).cgColor
+            blurView.layer.borderWidth = 1
+
+            let stackView = UIStackView()
+            stackView.axis = .vertical
+            stackView.alignment = .fill
+            stackView.distribution = .fillEqually
+            stackView.spacing = 0
+            stackView.translatesAutoresizingMaskIntoConstraints = false
+            blurView.contentView.addSubview(stackView)
+
+            NSLayoutConstraint.activate([
+                stackView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor, constant: 8),
+                stackView.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor, constant: -8),
+                stackView.topAnchor.constraint(equalTo: blurView.contentView.topAnchor, constant: 8),
+                stackView.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor, constant: -8)
+            ])
+
+            let actions: [(String, String, UIColor, () -> Void)] = [
+                ("Duplicate", "plus.square.on.square", .label, { [weak self] in self?.onContextAction(.duplicateModel(modelID)) }),
+                ("Center on Plate", "scope", .label, { [weak self] in self?.onContextAction(.centerModel(modelID)) }),
+                ("Auto Orient", "cube.transparent", .label, { [weak self] in self?.onContextAction(.autoOrientModel(modelID)) }),
+                ("Rotate Left 45 deg", "rotate.left", .label, { [weak self] in self?.onContextAction(.rotateModel(modelID, degrees: -45)) }),
+                ("Rotate Right 45 deg", "rotate.right", .label, { [weak self] in self?.onContextAction(.rotateModel(modelID, degrees: 45)) }),
+                ("Scale", "arrow.up.left.and.arrow.down.right", .label, { [weak self] in self?.presentScaleActionMenu(for: modelID, at: locationInContainer) }),
+                ("Reset Transform", "arrow.counterclockwise", .label, { [weak self] in self?.onContextAction(.resetModelTransform(modelID)) }),
+                ("Delete", "trash", .systemRed, { [weak self] in self?.onContextAction(.deleteModel(modelID)) })
+            ]
+
+            for action in actions {
+                stackView.addArrangedSubview(
+                    modelActionButton(
+                        title: action.0,
+                        systemImage: action.1,
+                        tintColor: action.2,
+                        action: action.3
+                    )
+                )
+            }
+
+            let menuWidth: CGFloat = 220
+            let menuHeight = CGFloat(actions.count * 38 + 16)
+            let margin: CGFloat = 14
+            let origin = CGPoint(
+                x: min(max(locationInContainer.x, margin), max(menuContainer.bounds.width - menuWidth - margin, margin)),
+                y: min(max(locationInContainer.y, margin), max(menuContainer.bounds.height - menuHeight - margin, margin))
+            )
+            blurView.frame = CGRect(origin: origin, size: CGSize(width: menuWidth, height: menuHeight))
+            overlayView.addSubview(blurView)
+            menuContainer.addSubview(overlayView)
+            modelActionMenuOverlayView = overlayView
         }
 
-        func updateSelection(selectedModelID: PlacedModel.ID?) {
+        private func presentScaleActionMenu(for modelID: PlacedModel.ID, at location: CGPoint) {
+            guard let sceneView else { return }
+
+            dismissModelActionMenu()
+
+            let menuContainer = sceneView.window ?? sceneView
+            let overlayView = UIControl(frame: menuContainer.bounds)
+            overlayView.backgroundColor = .clear
+            overlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlayView.addAction(
+                UIAction { [weak self] _ in
+                    self?.dismissModelActionMenu()
+                },
+                for: .touchUpInside
+            )
+
+            let panelView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
+            panelView.layer.cornerRadius = 8
+            panelView.layer.cornerCurve = .continuous
+            panelView.clipsToBounds = true
+            panelView.layer.borderColor = UIColor.white.withAlphaComponent(0.16).cgColor
+            panelView.layer.borderWidth = 1
+
+            let stackView = UIStackView()
+            stackView.axis = .vertical
+            stackView.alignment = .fill
+            stackView.spacing = 9
+            stackView.translatesAutoresizingMaskIntoConstraints = false
+            panelView.contentView.addSubview(stackView)
+
+            NSLayoutConstraint.activate([
+                stackView.leadingAnchor.constraint(equalTo: panelView.contentView.leadingAnchor, constant: 14),
+                stackView.trailingAnchor.constraint(equalTo: panelView.contentView.trailingAnchor, constant: -14),
+                stackView.topAnchor.constraint(equalTo: panelView.contentView.topAnchor, constant: 12),
+                stackView.bottomAnchor.constraint(equalTo: panelView.contentView.bottomAnchor, constant: -12)
+            ])
+
+            let scalePercent = modelScalePercentsByID[modelID] ?? 100
+            stackView.addArrangedSubview(scaleHeaderRow())
+            stackView.addArrangedSubview(scaleValueRow(title: "Scale", values: ["\(scalePercent)"], suffix: "%"))
+            stackView.addArrangedSubview(scaleValueRow(title: "Size", values: sizeValues(for: modelID), suffix: "mm"))
+            stackView.addArrangedSubview(uniformScaleRow())
+            stackView.addArrangedSubview(scaleShortcutRow(modelID: modelID, currentPercent: scalePercent, location: location))
+
+            let menuWidth: CGFloat = 356
+            let menuHeight: CGFloat = 150
+            let margin: CGFloat = 14
+            let origin = CGPoint(
+                x: min(max(location.x, margin), max(menuContainer.bounds.width - menuWidth - margin, margin)),
+                y: min(max(location.y, margin), max(menuContainer.bounds.height - menuHeight - margin, margin))
+            )
+            panelView.frame = CGRect(origin: origin, size: CGSize(width: menuWidth, height: menuHeight))
+            overlayView.addSubview(panelView)
+            menuContainer.addSubview(overlayView)
+            modelActionMenuOverlayView = overlayView
+        }
+
+        private func modelActionButton(
+            title: String,
+            systemImage: String,
+            tintColor: UIColor,
+            action: @escaping () -> Void
+        ) -> UIButton {
+            var configuration = UIButton.Configuration.plain()
+            configuration.title = title
+            configuration.image = UIImage(systemName: systemImage)
+            configuration.imagePadding = 10
+            configuration.baseForegroundColor = tintColor
+            configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8)
+
+            let button = UIButton(configuration: configuration)
+            button.contentHorizontalAlignment = .leading
+            button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+            button.addAction(
+                UIAction { [weak self] _ in
+                    self?.dismissModelActionMenu()
+                    action()
+                },
+                for: .touchUpInside
+            )
+            return button
+        }
+
+        private func scaleHeaderRow() -> UIView {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.alignment = .center
+            row.spacing = 8
+
+            let chevron = UIImageView(image: UIImage(systemName: "chevron.down"))
+            chevron.tintColor = .secondaryLabel
+            chevron.contentMode = .scaleAspectFit
+            chevron.setContentHuggingPriority(.required, for: .horizontal)
+
+            let label = UILabel()
+            label.text = "World coordinates"
+            label.textColor = .label
+            label.font = .systemFont(ofSize: 14, weight: .semibold)
+
+            for view in [chevron, label] {
+                row.addArrangedSubview(view)
+            }
+            return row
+        }
+
+        private func scaleValueRow(title: String, values: [String], suffix: String) -> UIView {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.alignment = .center
+            row.spacing = 7
+
+            let titleLabel = UILabel()
+            titleLabel.text = title
+            titleLabel.textColor = .secondaryLabel
+            titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            titleLabel.widthAnchor.constraint(equalToConstant: 54).isActive = true
+            row.addArrangedSubview(titleLabel)
+
+            for value in values {
+                row.addArrangedSubview(scaleFieldLabel(value))
+            }
+
+            let suffixLabel = UILabel()
+            suffixLabel.text = suffix
+            suffixLabel.textColor = .secondaryLabel
+            suffixLabel.font = .systemFont(ofSize: 12, weight: .medium)
+            suffixLabel.widthAnchor.constraint(equalToConstant: 24).isActive = true
+            row.addArrangedSubview(suffixLabel)
+
+            return row
+        }
+
+        private func scaleFieldLabel(_ text: String) -> UILabel {
+            let label = UILabel()
+            label.text = text
+            label.textAlignment = .center
+            label.textColor = .label
+            label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+            label.backgroundColor = UIColor.secondarySystemFill.withAlphaComponent(0.62)
+            label.layer.cornerRadius = 4
+            label.clipsToBounds = true
+            label.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            label.widthAnchor.constraint(equalToConstant: 64).isActive = true
+            return label
+        }
+
+        private func uniformScaleRow() -> UIView {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.alignment = .center
+            row.spacing = 8
+
+            let check = UIImageView(image: UIImage(systemName: "checkmark.square.fill"))
+            check.tintColor = .systemGreen
+            check.contentMode = .scaleAspectFit
+            check.widthAnchor.constraint(equalToConstant: 18).isActive = true
+
+            let label = UILabel()
+            label.text = "Uniform scale"
+            label.textColor = .label
+            label.font = .systemFont(ofSize: 13, weight: .medium)
+
+            row.addArrangedSubview(check)
+            row.addArrangedSubview(label)
+            return row
+        }
+
+        private func scaleShortcutRow(modelID: PlacedModel.ID, currentPercent: Int, location: CGPoint) -> UIView {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.alignment = .center
+            row.distribution = .fillEqually
+            row.spacing = 8
+
+            let shortcuts: [(String, Int)] = [
+                ("-10%", max(currentPercent - 10, 25)),
+                ("100%", 100),
+                ("+10%", min(currentPercent + 10, 400)),
+                ("200%", 200)
+            ]
+
+            for shortcut in shortcuts {
+                var configuration = UIButton.Configuration.filled()
+                configuration.title = shortcut.0
+                configuration.baseBackgroundColor = UIColor.secondarySystemFill
+                configuration.baseForegroundColor = .label
+                configuration.cornerStyle = .small
+                configuration.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8)
+
+                let button = UIButton(configuration: configuration)
+                button.addAction(
+                    UIAction { [weak self] _ in
+                        guard let self else { return }
+                        modelScalePercentsByID[modelID] = shortcut.1
+                        onContextAction(.setModelScale(modelID, percentage: shortcut.1))
+                        presentScaleActionMenu(for: modelID, at: location)
+                    },
+                    for: .touchUpInside
+                )
+                row.addArrangedSubview(button)
+            }
+
+            return row
+        }
+
+        private func sizeValues(for modelID: PlacedModel.ID) -> [String] {
+            guard let node = modelNodesByID[modelID] else {
+                return ["--", "--", "--"]
+            }
+
+            let bounds = node.recursiveBoundingBox()
+            let scale = node.scale
+            let width = abs(bounds.max.x - bounds.min.x) * abs(scale.x)
+            let height = abs(bounds.max.y - bounds.min.y) * abs(scale.y)
+            let depth = abs(bounds.max.z - bounds.min.z) * abs(scale.z)
+            return [width, depth, height].map { value in
+                value.isFinite ? String(format: "%.1f", value) : "--"
+            }
+        }
+
+        private func dismissModelActionMenu() {
+            modelActionMenuOverlayView?.removeFromSuperview()
+            modelActionMenuOverlayView = nil
+        }
+
+        func updateSelection(
+            selectedModelID: PlacedModel.ID?,
+            selectedSurfaceSelection: ModelSurfaceSelection?
+        ) {
             self.selectedModelID = selectedModelID
+            self.selectedSurfaceSelection = selectedSurfaceSelection
+            if selectedSurfaceSelection == nil {
+                clearSurfaceHighlight()
+            }
 
             for (modelID, node) in modelNodesByID {
-                if modelID == selectedModelID {
+                if modelID == selectedModelID && selectedSurfaceSelection?.modelID != modelID {
                     node.addSelectionOutline()
                 } else {
                     node.removeSelectionOutline()
@@ -788,44 +1346,24 @@ extension ModelWorkspaceSceneView.Coordinator: UIGestureRecognizerDelegate {
 
 extension ModelWorkspaceSceneView.Coordinator: UIPencilInteractionDelegate {
     func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
-        guard #available(iOS 16.0, *),
-              let sceneView else {
-            return
-        }
-
-        presentEditMenu(at: CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY))
     }
 
     @available(iOS 17.5, *)
     func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
-        guard let sceneView else {
-            return
-        }
-
-        let location = squeeze.hoverPose?.location ?? CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
-        presentEditMenu(at: location)
-    }
-}
-
-@available(iOS 16.0, *)
-extension ModelWorkspaceSceneView.Coordinator: UIEditMenuInteractionDelegate {
-    func editMenuInteraction(
-        _ interaction: UIEditMenuInteraction,
-        menuFor configuration: UIEditMenuConfiguration,
-        suggestedActions: [UIMenuElement]
-    ) -> UIMenu? {
-        menu(for: editMenuModelID)
-    }
-
-    func editMenuInteraction(
-        _ interaction: UIEditMenuInteraction,
-        targetRectFor configuration: UIEditMenuConfiguration
-    ) -> CGRect {
-        CGRect(origin: editMenuLocation, size: CGSize(width: 1, height: 1))
     }
 }
 
 private extension SCNNode {
+    func alignYAxis(to direction: SCNVector3) {
+        let normalizedDirection = direction.normalized()
+        let up = abs(normalizedDirection.y) > 0.92 ? SCNVector3(0, 0, 1) : SCNVector3(0, 1, 0)
+        look(
+            at: position + normalizedDirection,
+            up: up,
+            localFront: SCNVector3(0, 1, 0)
+        )
+    }
+
     func recursiveBoundingBox() -> (min: SCNVector3, max: SCNVector3) {
         var resolvedMin = SCNVector3Zero
         var resolvedMax = SCNVector3Zero
@@ -931,6 +1469,134 @@ private extension SCNNode {
 
     private static var selectionOutlineNodeName: String {
         "ModelWorkspaceSceneView.selectionOutline"
+    }
+}
+
+private extension SCNGeometry {
+    func triangleVertices(geometryIndex: Int, faceIndex: Int) -> (SCNVector3, SCNVector3, SCNVector3)? {
+        guard let vertexSource = sources(for: .vertex).first,
+              geometryIndex >= 0,
+              elements.indices.contains(geometryIndex),
+              faceIndex >= 0 else {
+            return nil
+        }
+
+        let element = elements[geometryIndex]
+        guard element.primitiveType == .triangles,
+              faceIndex < element.primitiveCount else {
+            return nil
+        }
+
+        let indices = (0..<3).compactMap { vertexOffset in
+            element.index(at: faceIndex * 3 + vertexOffset)
+        }
+        guard indices.count == 3,
+              let first = vertexSource.vector(at: indices[0]),
+              let second = vertexSource.vector(at: indices[1]),
+              let third = vertexSource.vector(at: indices[2]) else {
+            return nil
+        }
+
+        return (first, second, third)
+    }
+}
+
+private extension SCNGeometryElement {
+    func index(at primitiveVertexIndex: Int) -> Int? {
+        let offset = primitiveVertexIndex * bytesPerIndex
+        guard offset + bytesPerIndex <= data.count else {
+            return nil
+        }
+
+        return data.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress else { return nil }
+            let pointer = base.advanced(by: offset)
+            switch bytesPerIndex {
+            case 1:
+                return Int(pointer.load(as: UInt8.self))
+            case 2:
+                return Int(UInt16(littleEndian: pointer.load(as: UInt16.self)))
+            case 4:
+                return Int(UInt32(littleEndian: pointer.load(as: UInt32.self)))
+            default:
+                return nil
+            }
+        }
+    }
+}
+
+private extension SCNGeometrySource {
+    func vector(at index: Int) -> SCNVector3? {
+        guard usesFloatComponents,
+              index >= 0,
+              index < vectorCount,
+              componentsPerVector >= 3 else {
+            return nil
+        }
+
+        let baseOffset = dataOffset + index * dataStride
+        guard baseOffset + bytesPerComponent * 3 <= data.count else {
+            return nil
+        }
+
+        return data.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress else { return nil }
+            let pointer = base.advanced(by: baseOffset)
+            switch bytesPerComponent {
+            case 4:
+                return SCNVector3(
+                    pointer.load(fromByteOffset: 0, as: Float.self),
+                    pointer.load(fromByteOffset: 4, as: Float.self),
+                    pointer.load(fromByteOffset: 8, as: Float.self)
+                )
+            case 8:
+                return SCNVector3(
+                    Float(pointer.load(fromByteOffset: 0, as: Double.self)),
+                    Float(pointer.load(fromByteOffset: 8, as: Double.self)),
+                    Float(pointer.load(fromByteOffset: 16, as: Double.self))
+                )
+            default:
+                return nil
+            }
+        }
+    }
+}
+
+private extension CGPoint {
+    func distanceToSegment(from start: CGPoint, to end: CGPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else {
+            return hypot(x - start.x, y - start.y)
+        }
+
+        let projection = max(0, min(1, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared))
+        let closest = CGPoint(x: start.x + projection * dx, y: start.y + projection * dy)
+        return hypot(x - closest.x, y - closest.y)
+    }
+}
+
+private extension SCNVector3 {
+    var length: Float {
+        sqrt(x * x + y * y + z * z)
+    }
+
+    func normalized() -> SCNVector3 {
+        let length = max(length, 0.0001)
+        return SCNVector3(x / length, y / length, z / length)
+    }
+
+    static func + (left: SCNVector3, right: SCNVector3) -> SCNVector3 {
+        SCNVector3(left.x + right.x, left.y + right.y, left.z + right.z)
+    }
+
+    static func - (left: SCNVector3, right: SCNVector3) -> SCNVector3 {
+        SCNVector3(left.x - right.x, left.y - right.y, left.z - right.z)
+    }
+
+    static func * (vector: SCNVector3, scalar: Float) -> SCNVector3 {
+        SCNVector3(vector.x * scalar, vector.y * scalar, vector.z * scalar)
     }
 }
 
