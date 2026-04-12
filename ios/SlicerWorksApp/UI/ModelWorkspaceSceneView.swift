@@ -73,6 +73,9 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         panGesture.maximumNumberOfTouches = 1
         panGesture.cancelsTouchesInView = false
         panGesture.delegate = context.coordinator
+        if #available(iOS 13.4, *) {
+            panGesture.allowedScrollTypesMask = []
+        }
         view.addGestureRecognizer(panGesture)
 
         let rotationGesture = UIRotationGestureRecognizer(
@@ -93,6 +96,15 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             secondaryClickGesture.cancelsTouchesInView = false
             secondaryClickGesture.delegate = context.coordinator
             view.addGestureRecognizer(secondaryClickGesture)
+
+            let scrollZoomGesture = UIPanGestureRecognizer(
+                target: context.coordinator,
+                action: #selector(Coordinator.handleCameraScroll(_:))
+            )
+            scrollZoomGesture.allowedScrollTypesMask = [.continuous, .discrete]
+            scrollZoomGesture.cancelsTouchesInView = false
+            scrollZoomGesture.delegate = context.coordinator
+            view.addGestureRecognizer(scrollZoomGesture)
         }
         let longPressGesture = UILongPressGestureRecognizer(
             target: context.coordinator,
@@ -533,6 +545,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         var activeRotationModelID: PlacedModel.ID?
         var lastGestureRotation: CGFloat = 0
         var lastPinchScale: CGFloat = 1
+        var lastScrollTranslationY: CGFloat = 0
         private var pencilContactObserver: NSObjectProtocol?
         private var preferredFramesPerSecondBeforePencilContact: Int?
         private var wasPlayingBeforePencilContact: Bool?
@@ -628,10 +641,6 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             onSelectSurface(nil)
             onSelectModel(modelID)
             onContextAction(.selectModel(modelID))
-
-            if let modelID {
-                presentModelActionMenu(for: modelID, at: recognizer.location(in: sceneView))
-            }
         }
 
         @objc
@@ -654,6 +663,26 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
         }
 
         @objc
+        func handleCameraScroll(_ recognizer: UIPanGestureRecognizer) {
+            guard let cameraNode else { return }
+
+            switch recognizer.state {
+            case .began:
+                lastScrollTranslationY = recognizer.translation(in: recognizer.view).y
+            case .changed:
+                let translationY = recognizer.translation(in: recognizer.view).y
+                let deltaY = min(max(translationY - lastScrollTranslationY, -80), 80)
+                lastScrollTranslationY = translationY
+                let zoomFactor = pow(Float(1.0035), Float(deltaY))
+                zoomCamera(cameraNode, by: zoomFactor)
+            case .ended, .cancelled, .failed:
+                lastScrollTranslationY = 0
+            default:
+                break
+            }
+        }
+
+        @objc
         func handleSecondaryClick(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended,
                   let sceneView else {
@@ -666,6 +695,10 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             onSelectSurface(nil)
             onSelectModel(modelID)
             onContextAction(.selectModel(modelID))
+
+            if let modelID {
+                presentModelActionMenu(for: modelID, at: recognizer.location(in: sceneView))
+            }
         }
 
         @objc
@@ -987,15 +1020,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
 
             let menuContainer = sceneView.window ?? sceneView
             let locationInContainer = sceneView.convert(location, to: menuContainer)
-            let overlayView = UIControl(frame: menuContainer.bounds)
-            overlayView.backgroundColor = .clear
-            overlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            overlayView.addAction(
-                UIAction { [weak self] _ in
-                    self?.dismissModelActionMenu()
-                },
-                for: .touchUpInside
-            )
+            let overlayView = makeDismissOverlay(in: menuContainer)
 
             let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
             blurView.layer.cornerRadius = 8
@@ -1060,15 +1085,7 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             dismissModelActionMenu()
 
             let menuContainer = sceneView.window ?? sceneView
-            let overlayView = UIControl(frame: menuContainer.bounds)
-            overlayView.backgroundColor = .clear
-            overlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            overlayView.addAction(
-                UIAction { [weak self] _ in
-                    self?.dismissModelActionMenu()
-                },
-                for: .touchUpInside
-            )
+            let overlayView = makeDismissOverlay(in: menuContainer)
 
             let panelView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
             panelView.layer.cornerRadius = 8
@@ -1109,6 +1126,24 @@ struct ModelWorkspaceSceneView: UIViewRepresentable {
             overlayView.addSubview(panelView)
             menuContainer.addSubview(overlayView)
             modelActionMenuOverlayView = overlayView
+        }
+
+        private func makeDismissOverlay(in menuContainer: UIView) -> UIControl {
+            let overlayView = UIControl(frame: menuContainer.bounds)
+            overlayView.backgroundColor = .clear
+            overlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlayView.isEnabled = false
+            overlayView.addAction(
+                UIAction { [weak self] _ in
+                    self?.dismissModelActionMenu()
+                },
+                for: .touchUpInside
+            )
+
+            DispatchQueue.main.async { [weak overlayView] in
+                overlayView?.isEnabled = true
+            }
+            return overlayView
         }
 
         private func modelActionButton(
